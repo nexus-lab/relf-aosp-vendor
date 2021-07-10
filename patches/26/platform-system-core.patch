@@ -1,0 +1,286 @@
+diff --git a/fs_mgr/fs_mgr_boot_config.cpp b/fs_mgr/fs_mgr_boot_config.cpp
+index ab5beed..1b40244 100644
+--- a/fs_mgr/fs_mgr_boot_config.cpp
++++ b/fs_mgr/fs_mgr_boot_config.cpp
+@@ -21,19 +21,11 @@
+ 
+ #include "fs_mgr_priv.h"
+ 
+-// Tries to get the boot config value in properties, kernel cmdline and
+-// device tree (in that order).  returns 'true' if successfully found, 'false'
+-// otherwise
+-bool fs_mgr_get_boot_config(const std::string& key, std::string* out_val) {
++// Tries to get the given boot config value from kernel cmdline.
++// Returns true if successfully found, false otherwise.
++bool fs_mgr_get_boot_config_from_kernel_cmdline(const std::string& key, std::string* out_val) {
+     FS_MGR_CHECK(out_val != nullptr);
+ 
+-    // first check if we have "ro.boot" property already
+-    *out_val = android::base::GetProperty("ro.boot." + key, "");
+-    if (!out_val->empty()) {
+-        return true;
+-    }
+-
+-    // fallback to kernel cmdline, properties may not be ready yet
+     std::string cmdline;
+     std::string cmdline_key("androidboot." + key);
+     if (android::base::ReadFileToString("/proc/cmdline", &cmdline)) {
+@@ -48,10 +40,29 @@ bool fs_mgr_get_boot_config(const std::string& key, std::string* out_val) {
+         }
+     }
+ 
++    return false;
++}
++
++// Tries to get the boot config value in properties, kernel cmdline and
++// device tree (in that order).  returns 'true' if successfully found, 'false'
++// otherwise
++bool fs_mgr_get_boot_config(const std::string& key, std::string* out_val) {
++    FS_MGR_CHECK(out_val != nullptr);
++
++    // first check if we have "ro.boot" property already
++    *out_val = android::base::GetProperty("ro.boot." + key, "");
++    if (!out_val->empty()) {
++        return true;
++    }
++
++    // fallback to kernel cmdline, properties may not be ready yet
++    if (fs_mgr_get_boot_config_from_kernel_cmdline(key, out_val)) {
++        return true;
++    }
++
+     // lastly, check the device tree
+     if (is_dt_compatible()) {
+-        std::string file_name = kAndroidDtDir + "/" + key;
+-        // DT entries terminate with '\0' but so do the properties
++        std::string file_name = get_android_dt_dir() + "/" + key;
+         if (android::base::ReadFileToString(file_name, out_val)) {
+             return true;
+         }
+diff --git a/fs_mgr/fs_mgr_fstab.cpp b/fs_mgr/fs_mgr_fstab.cpp
+index 6c527c5..9300f9a 100644
+--- a/fs_mgr/fs_mgr_fstab.cpp
++++ b/fs_mgr/fs_mgr_fstab.cpp
+@@ -29,6 +29,8 @@
+ 
+ #include "fs_mgr_priv.h"
+ 
++const std::string kDefaultAndroidDtDir("/proc/device-tree/firmware/android");
++
+ struct fs_mgr_flag_values {
+     char *key_loc;
+     char* key_dir;
+@@ -365,9 +367,26 @@ static int parse_flags(char *flags, struct flag_list *fl,
+     return f;
+ }
+ 
++static std::string init_android_dt_dir() {
++    std::string android_dt_dir;
++    // The platform may specify a custom Android DT path in kernel cmdline
++    if (!fs_mgr_get_boot_config_from_kernel_cmdline("android_dt_dir", &android_dt_dir)) {
++        // Fall back to the standard procfs-based path
++        android_dt_dir = kDefaultAndroidDtDir;
++    }
++    return android_dt_dir;
++}
++
++// FIXME: The same logic is duplicated in system/core/init/
++const std::string& get_android_dt_dir() {
++    // Set once and saves time for subsequent calls to this function
++    static const std::string kAndroidDtDir = init_android_dt_dir();
++    return kAndroidDtDir;
++}
++
+ static bool is_dt_fstab_compatible() {
+     std::string dt_value;
+-    std::string file_name = kAndroidDtDir + "/fstab/compatible";
++    std::string file_name = get_android_dt_dir() + "/fstab/compatible";
+     if (read_dt_file(file_name, &dt_value)) {
+         if (dt_value == "android,fstab") {
+             return true;
+@@ -383,7 +402,7 @@ static std::string read_fstab_from_dt() {
+         return fstab;
+     }
+ 
+-    std::string fstabdir_name = kAndroidDtDir + "/fstab";
++    std::string fstabdir_name = get_android_dt_dir() + "/fstab";
+     std::unique_ptr<DIR, int (*)(DIR*)> fstabdir(opendir(fstabdir_name.c_str()), closedir);
+     if (!fstabdir) return fstab;
+ 
+@@ -446,7 +465,7 @@ static std::string read_fstab_from_dt() {
+ }
+ 
+ bool is_dt_compatible() {
+-    std::string file_name = kAndroidDtDir + "/compatible";
++    std::string file_name = get_android_dt_dir() + "/compatible";
+     std::string dt_value;
+     if (read_dt_file(file_name, &dt_value)) {
+         if (dt_value == "android,firmware") {
+diff --git a/fs_mgr/fs_mgr_priv.h b/fs_mgr/fs_mgr_priv.h
+index 3ca507b..91e4ca0 100644
+--- a/fs_mgr/fs_mgr_priv.h
++++ b/fs_mgr/fs_mgr_priv.h
+@@ -114,6 +114,7 @@
+ int fs_mgr_set_blk_ro(const char *blockdev);
+ int fs_mgr_test_access(const char *device);
+ bool fs_mgr_update_for_slotselect(struct fstab *fstab);
++const std::string& get_android_dt_dir();
+ bool is_dt_compatible();
+ bool is_device_secure();
+ int load_verity_state(struct fstab_rec* fstab, int* mode);
+diff --git a/fs_mgr/fs_mgr_priv_boot_config.h b/fs_mgr/fs_mgr_priv_boot_config.h
+index 8773d33..d98dc02 100644
+--- a/fs_mgr/fs_mgr_priv_boot_config.h
++++ b/fs_mgr/fs_mgr_priv_boot_config.h
+@@ -20,8 +20,7 @@
+ #include <sys/cdefs.h>
+ #include <string>
+ 
+-const std::string kAndroidDtDir("/proc/device-tree/firmware/android");
+-
++bool fs_mgr_get_boot_config_from_kernel_cmdline(const std::string& key, std::string* out_val);
+ bool fs_mgr_get_boot_config(const std::string& key, std::string* out_val);
+ 
+ #endif /* __CORE_FS_MGR_PRIV_BOOTCONFIG_H */
+diff --git a/init/init.cpp b/init/init.cpp
+index 9652efa..da51c3f 100644
+--- a/init/init.cpp
++++ b/init/init.cpp
+@@ -507,7 +507,7 @@ static void process_kernel_dt() {
+         return;
+     }
+ 
+-    std::unique_ptr<DIR, int (*)(DIR*)> dir(opendir(kAndroidDtDir.c_str()), closedir);
++    std::unique_ptr<DIR, int (*)(DIR*)> dir(opendir(init_get_android_dt_dir().c_str()), closedir);
+     if (!dir) return;
+ 
+     std::string dt_file;
+@@ -517,7 +517,7 @@ static void process_kernel_dt() {
+             continue;
+         }
+ 
+-        std::string file_name = kAndroidDtDir + dp->d_name;
++        std::string file_name = init_get_android_dt_dir() + dp->d_name;
+ 
+         android::base::ReadFileToString(file_name, &dt_file);
+         std::replace(dt_file.begin(), dt_file.end(), ',', '.');
+diff --git a/init/util.cpp b/init/util.cpp
+index dfdfeb4..6aad73c 100644
+--- a/init/util.cpp
++++ b/init/util.cpp
+@@ -50,6 +50,8 @@
+ using android::base::boot_clock;
+ using namespace std::literals::string_literals;
+ 
++const std::string kDefaultAndroidDtDir("/proc/device-tree/firmware/android/");
++
+ // DecodeUid() - decodes and returns the given string, which can be either the
+ // numeric or name representation, into the integer uid or gid. Returns
+ // UINT_MAX on error.
+@@ -376,10 +378,33 @@ std::ostream& operator<<(std::ostream& os, const Timer& t) {
+     return os;
+ }
+ 
+-// Reads the content of device tree file under kAndroidDtDir directory.
++static std::string init_android_dt_dir() {
++    // Use the standard procfs-based path by default
++    std::string android_dt_dir = kDefaultAndroidDtDir;
++    // The platform may specify a custom Android DT path in kernel cmdline
++    import_kernel_cmdline(false,
++                          [&](const std::string& key, const std::string& value, bool in_qemu) {
++                              if (key == "androidboot.android_dt_dir") {
++                                  android_dt_dir = value;
++                              }
++                          });
++    LOG(INFO) << "Using Android DT directory " << android_dt_dir;
++    return android_dt_dir;
++}
++
++// FIXME: The same logic is duplicated in system/core/fs_mgr/
++const std::string& init_get_android_dt_dir() {
++    // Set once and saves time for subsequent calls to this function
++    static const std::string kAndroidDtDir = init_android_dt_dir();
++    return kAndroidDtDir;
++}
++
++// Reads the content of device tree file under the platform's Android DT directory.
+ // Returns true if the read is success, false otherwise.
+ bool read_android_dt_file(const std::string& sub_path, std::string* dt_content) {
+-    const std::string file_name = kAndroidDtDir + sub_path;
++    //const std::string file_name = kAndroidDtDir + sub_path;
++    const std::string file_name = init_get_android_dt_dir() + sub_path;
++    LOG(INFO) << "Reading DT file " << file_name;
+     if (android::base::ReadFileToString(file_name, dt_content)) {
+         if (!dt_content->empty()) {
+             dt_content->pop_back();  // Trims the trailing '\0' out.
+@@ -392,6 +417,7 @@ bool read_android_dt_file(const std::string& sub_path, std::string* dt_content)
+ bool is_android_dt_value_expected(const std::string& sub_path, const std::string& expected_content) {
+     std::string dt_content;
+     if (read_android_dt_file(sub_path, &dt_content)) {
++	LOG(INFO) << "DT content is " << dt_content;
+         if (dt_content == expected_content) {
+             return true;
+         }
+diff --git a/init/util.h b/init/util.h
+index 1ad6b77..ea7836b 100644
+--- a/init/util.h
++++ b/init/util.h
+@@ -30,8 +30,6 @@
+ 
+ #define COLDBOOT_DONE "/dev/.coldboot_done"
+ 
+-const std::string kAndroidDtDir("/proc/device-tree/firmware/android/");
+-
+ using android::base::boot_clock;
+ using namespace std::chrono_literals;
+ 
+@@ -74,7 +72,10 @@ bool expand_props(const std::string& src, std::string* dst);
+ 
+ void panic() __attribute__((__noreturn__));
+ 
+-// Reads or compares the content of device tree file under kAndroidDtDir directory.
++// Returns the platform's Android DT directory as specified in the kernel cmdline.
++// If the platform does not configure a custom DT path, returns the standard one (based in procfs).
++const std::string& init_get_android_dt_dir();
++// Reads or compares the content of device tree file under the platform's Android DT directory.
+ bool read_android_dt_file(const std::string& sub_path, std::string* dt_content);
+ bool is_android_dt_value_expected(const std::string& sub_path, const std::string& expected_content);
+ 
+diff --git a/rootdir/init.rc b/rootdir/init.rc
+index fd2c838..94b5592 100644
+--- a/rootdir/init.rc
++++ b/rootdir/init.rc
+@@ -182,6 +182,10 @@ on init
+     copy /dev/cpuset/cpus /dev/cpuset/top-app/cpus
+     copy /dev/cpuset/mems /dev/cpuset/top-app/mems
+ 
++    mkdir /dev/cpuset/camera-daemon
++    copy /dev/cpuset/cpus /dev/cpuset/camera-daemon/cpus
++    copy /dev/cpuset/mems /dev/cpuset/camera-daemon/mems
++
+     # change permissions for all cpusets we'll touch at runtime
+     chown system system /dev/cpuset
+     chown system system /dev/cpuset/foreground
+@@ -189,12 +193,14 @@ on init
+     chown system system /dev/cpuset/background
+     chown system system /dev/cpuset/system-background
+     chown system system /dev/cpuset/top-app
++    chown system system /dev/cpuset/camera-daemon
+     chown system system /dev/cpuset/tasks
+     chown system system /dev/cpuset/foreground/tasks
+     chown system system /dev/cpuset/foreground/boost/tasks
+     chown system system /dev/cpuset/background/tasks
+     chown system system /dev/cpuset/system-background/tasks
+     chown system system /dev/cpuset/top-app/tasks
++    chown system system /dev/cpuset/camera-daemon/tasks
+ 
+     # set system-background to 0775 so SurfaceFlinger can touch it
+     chmod 0775 /dev/cpuset/system-background
+@@ -204,6 +210,7 @@ on init
+     chmod 0664 /dev/cpuset/background/tasks
+     chmod 0664 /dev/cpuset/system-background/tasks
+     chmod 0664 /dev/cpuset/top-app/tasks
++    chmod 0664 /dev/cpuset/camera-daemon/tasks
+     chmod 0664 /dev/cpuset/tasks
+ 
+ 

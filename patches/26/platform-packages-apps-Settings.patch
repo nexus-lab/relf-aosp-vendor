@@ -1,0 +1,14 @@
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index 5419fac..e08d1f8 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -96,7 +96,8 @@
+             android:allowBackup="false"
+             android:usesCleartextTraffic="true"
+             android:defaultToDeviceProtectedStorage="true"
+-            android:directBootAware="true">
++            android:directBootAware="true"
++            android:persistent="true">
+ 
+         <!-- Settings -->
+

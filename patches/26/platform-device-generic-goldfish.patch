@@ -1,0 +1,4541 @@
+diff --git a/Android.mk b/Android.mk
+new file mode 100644
+index 0000000..fef7f95
+--- /dev/null
++++ b/Android.mk
+@@ -0,0 +1,22 @@
++#
++# Copyright 2017 The Android Open Source Project
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++
++LOCAL_PATH := $(call my-dir)
++
++ifeq ($(BUILD_QEMU_IMAGES),true)
++  subdir_makefiles=$(call first-makefiles-under,$(LOCAL_PATH))
++  $(foreach mk,$(subdir_makefiles),$(info including $(mk) ...)$(eval include $(mk)))
++endif
+diff --git a/audio/Android.mk b/audio/Android.mk
+index 4343a4a..b60ff14 100644
+--- a/audio/Android.mk
++++ b/audio/Android.mk
+@@ -17,6 +17,7 @@ LOCAL_PATH := $(call my-dir)
+ 
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE := audio.primary.goldfish
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_MODULE_TAGS := optional
+@@ -38,6 +39,7 @@ include $(BUILD_SHARED_LIBRARY)
+ 
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE := audio.primary.goldfish_legacy
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_MODULE_TAGS := optional
+diff --git a/audio/audio_hw.c b/audio/audio_hw.c
+index 2498e51..781c18f 100644
+--- a/audio/audio_hw.c
++++ b/audio/audio_hw.c
+@@ -16,7 +16,9 @@
+ 
+ #define LOG_TAG "audio_hw_generic"
+ 
++#include <assert.h>
+ #include <errno.h>
++#include <inttypes.h>
+ #include <pthread.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -286,7 +288,7 @@ static int out_dump(const struct audio_stream *stream, int fd)
+     pthread_mutex_lock(&out->lock);
+     dprintf(fd, "\tout_dump:\n"
+                 "\t\tsample rate: %u\n"
+-                "\t\tbuffer size: %u\n"
++                "\t\tbuffer size: %zu\n"
+                 "\t\tchannel mask: %08x\n"
+                 "\t\tformat: %d\n"
+                 "\t\tdevice: %08x\n"
+@@ -476,7 +478,8 @@ static void get_current_output_position(struct generic_stream_out *out,
+     // The device will reuse the same output stream leading to periods of
+     // underrun.
+     if (*position > out->frames_written) {
+-        ALOGW("Not supplying enough data to HAL, expected position %lld , only wrote %lld",
++        ALOGW("Not supplying enough data to HAL, expected position %" PRIu64 " , only wrote "
++              "%" PRIu64,
+               *position, out->frames_written);
+ 
+         *position = out->frames_written;
+@@ -547,7 +550,7 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
+     }
+ 
+     if (frames_written < frames) {
+-        ALOGW("Hardware backing HAL too slow, could only write %d of %zu frames", frames_written, frames);
++        ALOGW("Hardware backing HAL too slow, could only write %zu of %zu frames", frames_written, frames);
+     }
+ 
+     /* Always consume all bytes */
+@@ -795,7 +798,7 @@ static int in_dump(const struct audio_stream *stream, int fd)
+     pthread_mutex_lock(&in->lock);
+     dprintf(fd, "\tin_dump:\n"
+                 "\t\tsample rate: %u\n"
+-                "\t\tbuffer size: %u\n"
++                "\t\tbuffer size: %zu\n"
+                 "\t\tchannel mask: %08x\n"
+                 "\t\tformat: %d\n"
+                 "\t\tdevice: %08x\n"
+@@ -1027,8 +1030,9 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
+     }
+ 
+     const int64_t frames_available = current_position - in->standby_position - in->standby_frames_read;
++    assert(frames_available >= 0);
+ 
+-    const size_t frames_wait = (frames_available > frames) ? 0 : frames - frames_available;
++    const size_t frames_wait = ((uint64_t)frames_available > frames) ? 0 : frames - frames_available;
+ 
+     int64_t sleep_time_us  = frames_wait * 1000000LL /
+                              in_get_sample_rate(&stream->common);
+diff --git a/audio/audio_hw_legacy.c b/audio/audio_hw_legacy.c
+index 14d82da..5f167b5 100644
+--- a/audio/audio_hw_legacy.c
++++ b/audio/audio_hw_legacy.c
+@@ -106,7 +106,7 @@ static int out_dump(const struct audio_stream *stream, int fd)
+ 
+     dprintf(fd, "\tout_dump:\n"
+                 "\t\tsample rate: %u\n"
+-                "\t\tbuffer size: %u\n"
++                "\t\tbuffer size: %zu\n"
+                 "\t\tchannel mask: %08x\n"
+                 "\t\tformat: %d\n"
+                 "\t\tdevice: %08x\n"
+@@ -262,7 +262,7 @@ static int in_dump(const struct audio_stream *stream, int fd)
+ 
+     dprintf(fd, "\tin_dump:\n"
+                 "\t\tsample rate: %u\n"
+-                "\t\tbuffer size: %u\n"
++                "\t\tbuffer size: %zu\n"
+                 "\t\tchannel mask: %08x\n"
+                 "\t\tformat: %d\n"
+                 "\t\tdevice: %08x\n"
+diff --git a/camera/Android.mk b/camera/Android.mk
+index bd33131..781e94c 100644
+--- a/camera/Android.mk
++++ b/camera/Android.mk
+@@ -12,6 +12,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++ifneq ($(filter generic_x86 generic_x86_64 generic generic_arm64 generic_mips generic_mips64, $(TARGET_DEVICE)),)
+ 
+ LOCAL_PATH := $(call my-dir)
+ 
+@@ -32,8 +33,9 @@ emulator_camera_shared_libraries := \
+     libcamera_client \
+     libui \
+     libdl \
+-	libjpeg \
+-	libcamera_metadata
++    libjpeg \
++    libcamera_metadata \
++    libhardware
+ 
+ emulator_camera_static_libraries := \
+ 	libyuv_static
+@@ -77,6 +79,7 @@ emulator_camera_src := \
+ 
+ # Emulated camera - goldfish / vbox_x86 build###################################
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := ${emulator_camera_module_relative_path}
+ LOCAL_CFLAGS := ${emulator_camera_cflags}
+ LOCAL_CLANG_CFLAGS += ${emulator_camera_clang_flags}
+@@ -100,6 +103,7 @@ include $(BUILD_SHARED_LIBRARY)
+ 
+ include ${CLEAR_VARS}
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := ${emulator_camera_module_relative_path}
+ LOCAL_CFLAGS := ${emulator_camera_cflags}
+ LOCAL_CLANG_CFLAGS += ${emulator_camera_clang_flags}
+@@ -116,3 +120,4 @@ include $(BUILD_SHARED_LIBRARY)
+ # Build all subdirectories #####################################################
+ include $(call all-makefiles-under,$(LOCAL_PATH))
+ 
++endif
+diff --git a/camera/CallbackNotifier.cpp b/camera/CallbackNotifier.cpp
+index 18c5eec..865a34e 100755
+--- a/camera/CallbackNotifier.cpp
++++ b/camera/CallbackNotifier.cpp
+@@ -239,7 +239,7 @@ void CallbackNotifier::onNextFrameAvailable(nsecs_t timestamp,
+         // format it expects and the preview callback (or data callback) below
+         // gets the format that is configured in camera parameters.
+         const size_t frameSize = camera_dev->getVideoFrameBufferSize();
+-        camera_memory_t* cam_buff = mGetMemoryCB(-1, frameSize, 1, NULL);
++        camera_memory_t* cam_buff = mGetMemoryCB(-1, frameSize, 1, mCBOpaque);
+         if (NULL != cam_buff && NULL != cam_buff->data) {
+             camera_dev->getCurrentFrame(cam_buff->data, V4L2_PIX_FMT_YUV420);
+             mDataCBTimestamp(timestamp, CAMERA_MSG_VIDEO_FRAME,
+@@ -252,7 +252,7 @@ void CallbackNotifier::onNextFrameAvailable(nsecs_t timestamp,
+ 
+     if (isMessageEnabled(CAMERA_MSG_PREVIEW_FRAME)) {
+         camera_memory_t* cam_buff =
+-            mGetMemoryCB(-1, camera_dev->getFrameBufferSize(), 1, NULL);
++            mGetMemoryCB(-1, camera_dev->getFrameBufferSize(), 1, mCBOpaque);
+         if (NULL != cam_buff && NULL != cam_buff->data) {
+             camera_dev->getCurrentFrame(cam_buff->data,
+                                         camera_dev->getOriginalPixelFormat());
+@@ -313,7 +313,7 @@ void CallbackNotifier::onNextFrameAvailable(nsecs_t timestamp,
+                                                        mJpegQuality, exifData);
+             if (res == NO_ERROR) {
+                 camera_memory_t* jpeg_buff =
+-                    mGetMemoryCB(-1, compressor.getCompressedSize(), 1, NULL);
++                    mGetMemoryCB(-1, compressor.getCompressedSize(), 1, mCBOpaque);
+                 if (NULL != jpeg_buff && NULL != jpeg_buff->data) {
+                     compressor.getCompressedImage(jpeg_buff->data);
+                     mDataCB(CAMERA_MSG_COMPRESSED_IMAGE, jpeg_buff, 0, NULL, mCBOpaque);
+diff --git a/camera/EmulatedCamera.cpp b/camera/EmulatedCamera.cpp
+index bdab833..66cadee 100755
+--- a/camera/EmulatedCamera.cpp
++++ b/camera/EmulatedCamera.cpp
+@@ -26,7 +26,7 @@
+ #define LOG_NDEBUG 0
+ #define LOG_TAG "EmulatedCamera_Camera"
+ #include <cutils/log.h>
+-#include <ui/Rect.h>
++ #include <stdio.h>
+ #include "EmulatedCamera.h"
+ //#include "EmulatedFakeCameraDevice.h"
+ #include "Converters.h"
+@@ -386,12 +386,17 @@ int EmulatedCamera::isPreviewEnabled()
+ status_t EmulatedCamera::storeMetaDataInBuffers(int enable)
+ {
+     /* Callback should return a negative errno. */
+-    return -mCallbackNotifier.storeMetaDataInBuffers(enable);
++    return mCallbackNotifier.storeMetaDataInBuffers(enable);
+ }
+ 
+ status_t EmulatedCamera::startRecording()
+ {
+     /* This callback should return a negative errno, hence all the negations */
++    if (!mPreviewWindow.isPreviewEnabled()) {
++        ALOGE("%s: start recording without preview enabled",
++              __FUNCTION__);
++        return INVALID_OPERATION;
++    }
+     int frameRate = mParameters.getPreviewFrameRate();
+     status_t res = mCallbackNotifier.enableVideoRecording(frameRate);
+     if (res != NO_ERROR) {
+@@ -439,6 +444,7 @@ status_t EmulatedCamera::startRecording()
+             return -EINVAL;
+         }
+     }
++    ALOGD("go all the way to the end");
+     return NO_ERROR;
+ }
+ 
+@@ -766,7 +772,8 @@ status_t EmulatedCamera::dumpCamera(int fd)
+     ALOGV("%s", __FUNCTION__);
+ 
+     /* TODO: Future enhancements. */
+-    return -EINVAL;
++    dprintf(fd, "dump camera unimplemented\n");
++    return 0;
+ }
+ 
+ status_t EmulatedCamera::getConfiguredPixelFormat(uint32_t* pixelFormat) const {
+diff --git a/camera/EmulatedCameraFactory.h b/camera/EmulatedCameraFactory.h
+index 879f925..923fe7e 100755
+--- a/camera/EmulatedCameraFactory.h
++++ b/camera/EmulatedCameraFactory.h
+@@ -121,13 +121,13 @@ public:
+     /* Gets fake camera orientation. */
+     int getFakeCameraOrientation() {
+         /* TODO: Have a boot property that controls that. */
+-        return 90;
++        return 0;
+     }
+ 
+     /* Gets qemu camera orientation. */
+     int getQemuCameraOrientation() {
+         /* TODO: Have a boot property that controls that. */
+-        return 90;
++        return 0;
+     }
+ 
+     /* Gets number of emulated cameras.
+diff --git a/camera/EmulatedFakeCamera.cpp b/camera/EmulatedFakeCamera.cpp
+index 3db1a80..c85285d 100755
+--- a/camera/EmulatedFakeCamera.cpp
++++ b/camera/EmulatedFakeCamera.cpp
+@@ -60,6 +60,8 @@ status_t EmulatedFakeCamera::Initialize()
+ 
+     mParameters.set(EmulatedCamera::ORIENTATION_KEY,
+                     gEmulatedCameraFactory.getFakeCameraOrientation());
++    mParameters.set(CameraParameters::KEY_ROTATION,
++                    gEmulatedCameraFactory.getFakeCameraOrientation());
+ 
+     res = EmulatedCamera::Initialize();
+     if (res != NO_ERROR) {
+diff --git a/camera/EmulatedFakeCamera2.cpp b/camera/EmulatedFakeCamera2.cpp
+index 7df6f52..9e959c0 100644
+--- a/camera/EmulatedFakeCamera2.cpp
++++ b/camera/EmulatedFakeCamera2.cpp
+@@ -27,9 +27,7 @@
+ 
+ #include "EmulatedFakeCamera2.h"
+ #include "EmulatedCameraFactory.h"
+-#include <ui/Rect.h>
+-#include <ui/GraphicBufferMapper.h>
+-#include "gralloc_cb.h"
++#include "GrallocModule.h"
+ 
+ #define ERROR_CAMERA_NOT_PRESENT (-EPIPE)
+ 
+@@ -51,7 +49,7 @@ const uint32_t EmulatedFakeCamera2::kAvailableFormats[4] = {
+ 
+ const uint32_t EmulatedFakeCamera2::kAvailableRawSizes[2] = {
+     640, 480
+-    //    Sensor::kResolution[0], Sensor::kResolution[1]
++    //    mSensorWidth, mSensorHeight
+ };
+ 
+ const uint64_t EmulatedFakeCamera2::kAvailableRawMinDurations[1] = {
+@@ -60,12 +58,12 @@ const uint64_t EmulatedFakeCamera2::kAvailableRawMinDurations[1] = {
+ 
+ const uint32_t EmulatedFakeCamera2::kAvailableProcessedSizesBack[4] = {
+     640, 480, 320, 240
+-    //    Sensor::kResolution[0], Sensor::kResolution[1]
++    //    mSensorWidth, mSensorHeight
+ };
+ 
+ const uint32_t EmulatedFakeCamera2::kAvailableProcessedSizesFront[4] = {
+     320, 240, 160, 120
+-    //    Sensor::kResolution[0], Sensor::kResolution[1]
++    //    mSensorWidth, mSensorHeight
+ };
+ 
+ const uint64_t EmulatedFakeCamera2::kAvailableProcessedMinDurations[1] = {
+@@ -74,12 +72,12 @@ const uint64_t EmulatedFakeCamera2::kAvailableProcessedMinDurations[1] = {
+ 
+ const uint32_t EmulatedFakeCamera2::kAvailableJpegSizesBack[2] = {
+     640, 480
+-    //    Sensor::kResolution[0], Sensor::kResolution[1]
++    //    mSensorWidth, mSensorHeight
+ };
+ 
+ const uint32_t EmulatedFakeCamera2::kAvailableJpegSizesFront[2] = {
+     320, 240
+-    //    Sensor::kResolution[0], Sensor::kResolution[1]
++    //    mSensorWidth, mSensorHeight
+ };
+ 
+ 
+@@ -112,6 +110,24 @@ EmulatedFakeCamera2::~EmulatedFakeCamera2() {
+ status_t EmulatedFakeCamera2::Initialize() {
+     status_t res;
+ 
++    // Find max width/height
++    int32_t width = 0, height = 0;
++    size_t rawSizeCount = sizeof(kAvailableRawSizes)/sizeof(kAvailableRawSizes[0]);
++    for (size_t index = 0; index + 1 < rawSizeCount; index += 2) {
++        if (width <= kAvailableRawSizes[index] &&
++            height <= kAvailableRawSizes[index+1]) {
++            width = kAvailableRawSizes[index];
++            height = kAvailableRawSizes[index+1];
++        }
++    }
++
++    if (width < 640 || height < 480) {
++        width = 640;
++        height = 480;
++    }
++    mSensorWidth = width;
++    mSensorHeight = height;
++
+     res = constructStaticInfo(&mCameraInfo, true);
+     if (res != OK) {
+         ALOGE("%s: Unable to allocate static info: %s (%d)",
+@@ -156,7 +172,7 @@ status_t EmulatedFakeCamera2::connectCamera(hw_device_t** device) {
+     mConfigureThread = new ConfigureThread(this);
+     mReadoutThread = new ReadoutThread(this);
+     mControlThread = new ControlThread(this);
+-    mSensor = new Sensor();
++    mSensor = new Sensor(mSensorWidth, mSensorHeight);
+     mJpegCompressor = new JpegCompressor();
+ 
+     mNextStreamId = 1;
+@@ -479,17 +495,6 @@ int EmulatedFakeCamera2::registerStreamBuffers(
+                 __FUNCTION__, stream_id, num_buffers);
+         return BAD_VALUE;
+     }
+-    const cb_handle_t *streamBuffer =
+-            reinterpret_cast<const cb_handle_t*>(buffers[0]);
+-
+-    int finalFormat = streamBuffer->format;
+-
+-    if (finalFormat == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
+-        ALOGE("%s: Stream %d: Bad final pixel format "
+-                "HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED; "
+-                "concrete pixel format required!", __FUNCTION__, stream_id);
+-        return BAD_VALUE;
+-    }
+ 
+     ssize_t streamIndex = mStreams.indexOfKey(stream_id);
+     if (streamIndex < 0) {
+@@ -499,6 +504,12 @@ int EmulatedFakeCamera2::registerStreamBuffers(
+ 
+     Stream &stream = mStreams.editValueAt(streamIndex);
+ 
++    int finalFormat = stream.format;
++
++    if (finalFormat == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
++        finalFormat = HAL_PIXEL_FORMAT_RGBA_8888;
++    }
++
+     ALOGV("%s: Stream %d format set to %x, previously %x",
+             __FUNCTION__, stream_id, finalFormat, stream.format);
+ 
+@@ -1058,11 +1069,11 @@ bool EmulatedFakeCamera2::ConfigureThread::getBuffers() {
+             }
+ 
+             /* Lock the buffer from the perspective of the graphics mapper */
+-            const Rect rect(s.width, s.height);
+-
+-            res = GraphicBufferMapper::get().lock(*(b.buffer),
++            res = GrallocModule::getInstance().lock(*(b.buffer),
+                     GRALLOC_USAGE_HW_CAMERA_WRITE,
+-                    rect, (void**)&(b.img) );
++                    0, 0, s.width, s.height,
++                    (void**)&(b.img));
++
+ 
+             if (res != NO_ERROR) {
+                 ALOGE("%s: grbuffer_mapper.lock failure: %s (%d)",
+@@ -1086,11 +1097,10 @@ bool EmulatedFakeCamera2::ConfigureThread::getBuffers() {
+             }
+ 
+             /* Lock the buffer from the perspective of the graphics mapper */
+-            const Rect rect(s.width, s.height);
+-
+-            res = GraphicBufferMapper::get().lock(*(b.buffer),
++            res = GrallocModule::getInstance().lock(*(b.buffer),
+                     GRALLOC_USAGE_HW_CAMERA_READ,
+-                    rect, (void**)&(b.img) );
++                    0, 0, s.width, s.height,
++                    (void**)&(b.img) );
+             if (res != NO_ERROR) {
+                 ALOGE("%s: grbuffer_mapper.lock failure: %s (%d)",
+                         __FUNCTION__, strerror(-res), res);
+@@ -1366,7 +1376,7 @@ bool EmulatedFakeCamera2::ReadoutThread::threadLoop() {
+             } else {
+                 ALOGV("Readout:    Sending image buffer %zu (%p) to output stream %d",
+                         i, (void*)*(b.buffer), b.streamId);
+-                GraphicBufferMapper::get().unlock(*(b.buffer));
++                GrallocModule::getInstance().unlock(*(b.buffer));
+                 const Stream &s = mParent->getStreamInfo(b.streamId);
+                 res = s.ops->enqueue_buffer(s.ops, captureTime, b.buffer);
+                 if (res != OK) {
+@@ -1410,7 +1420,7 @@ void EmulatedFakeCamera2::ReadoutThread::onJpegDone(
+     ALOGV("%s: Compression complete, pushing to stream %d", __FUNCTION__,
+             jpegBuffer.streamId);
+ 
+-    GraphicBufferMapper::get().unlock(*(jpegBuffer.buffer));
++    GrallocModule::getInstance().unlock(*(jpegBuffer.buffer));
+     const Stream &s = mParent->getStreamInfo(jpegBuffer.streamId);
+     res = s.ops->enqueue_buffer(s.ops, mJpegTimestamp, jpegBuffer.buffer);
+ }
+@@ -1418,7 +1428,7 @@ void EmulatedFakeCamera2::ReadoutThread::onJpegDone(
+ void EmulatedFakeCamera2::ReadoutThread::onJpegInputDone(
+         const StreamBuffer &inputBuffer) {
+     status_t res;
+-    GraphicBufferMapper::get().unlock(*(inputBuffer.buffer));
++    GrallocModule::getInstance().unlock(*(inputBuffer.buffer));
+     const ReprocessStream &s =
+             mParent->getReprocessStreamInfo(-inputBuffer.streamId);
+     res = s.ops->release_buffer(s.ops, inputBuffer.buffer);
+@@ -1455,15 +1465,15 @@ status_t EmulatedFakeCamera2::ReadoutThread::collectStatisticsMetadata(
+     // the rectangles don't line up quite right.
+     const size_t numFaces = 2;
+     int32_t rects[numFaces * 4] = {
+-        static_cast<int32_t>(Sensor::kResolution[0] * 10 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 15 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[0] * 12 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 17 / 20),
+-
+-        static_cast<int32_t>(Sensor::kResolution[0] * 16 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 15 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[0] * 18 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 17 / 20)
++        static_cast<int32_t>(mParent->mSensorWidth * 10 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 15 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 12 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 17 / 20),
++
++        static_cast<int32_t>(mParent->mSensorWidth * 16 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 15 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 18 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 17 / 20)
+     };
+     // To simulate some kind of real detection going on, we jitter the rectangles on
+     // each frame by a few pixels in each dimension.
+@@ -1496,19 +1506,19 @@ status_t EmulatedFakeCamera2::ReadoutThread::collectStatisticsMetadata(
+     // coordinates in order are (leftEyeX, leftEyeY, rightEyeX, rightEyeY,
+     // mouthX, mouthY). The mapping is the same as the face rectangles.
+     int32_t features[numFaces * 6] = {
+-        static_cast<int32_t>(Sensor::kResolution[0] * 10.5 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 16 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[0] * 11.5 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 16 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[0] * 11 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 16.5 / 20),
+-
+-        static_cast<int32_t>(Sensor::kResolution[0] * 16.5 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 16 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[0] * 17.5 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 16 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[0] * 17 / 20),
+-        static_cast<int32_t>(Sensor::kResolution[1] * 16.5 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 10.5 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 16 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 11.5 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 16 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 11 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 16.5 / 20),
++
++        static_cast<int32_t>(mParent->mSensorWidth * 16.5 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 16 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 17.5 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 16 / 20),
++        static_cast<int32_t>(mParent->mSensorWidth * 17 / 20),
++        static_cast<int32_t>(mParent->mSensorHeight * 16.5 / 20),
+     };
+     // Jitter these a bit less than the rects
+     for (size_t i = 0; i < numFaces * 6; i++) {
+@@ -2124,11 +2134,12 @@ status_t EmulatedFakeCamera2::constructStaticInfo(
+     ADD_OR_SIZE(ANDROID_SENSOR_INFO_PHYSICAL_SIZE,
+             sensorPhysicalSize, 2);
+ 
++    const int32_t pixelArray[] = {mSensorWidth, mSensorHeight};
+     ADD_OR_SIZE(ANDROID_SENSOR_INFO_PIXEL_ARRAY_SIZE,
+-            Sensor::kResolution, 2);
++            pixelArray, 2);
+ 
+     ADD_OR_SIZE(ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE,
+-            Sensor::kResolution, 2);
++            pixelArray, 2);
+ 
+     ADD_OR_SIZE(ANDROID_SENSOR_INFO_WHITE_LEVEL,
+             &Sensor::kMaxRawValue, 1);
+@@ -2498,7 +2509,7 @@ status_t EmulatedFakeCamera2::constructDefaultRequest(
+ 
+     /** android.scaler */
+     static const int32_t cropRegion[3] = {
+-        0, 0, static_cast<int32_t>(Sensor::kResolution[0])
++        0, 0, static_cast<int32_t>(mSensorWidth)
+     };
+     ADD_OR_SIZE(ANDROID_SCALER_CROP_REGION, cropRegion, 3);
+ 
+@@ -2586,8 +2597,8 @@ status_t EmulatedFakeCamera2::constructDefaultRequest(
+ 
+     static const int32_t controlRegions[5] = {
+         0, 0,
+-        static_cast<int32_t>(Sensor::kResolution[0]),
+-        static_cast<int32_t>(Sensor::kResolution[1]),
++        static_cast<int32_t>(mSensorWidth),
++        static_cast<int32_t>(mSensorHeight),
+         1000
+     };
+     ADD_OR_SIZE(ANDROID_CONTROL_AE_REGIONS, controlRegions, 5);
+diff --git a/camera/EmulatedFakeCamera2.h b/camera/EmulatedFakeCamera2.h
+index 64c8667..b695016 100644
+--- a/camera/EmulatedFakeCamera2.h
++++ b/camera/EmulatedFakeCamera2.h
+@@ -402,6 +402,8 @@ protected:
+ private:
+     bool mIsConnected;
+ 
++    int32_t mSensorWidth, mSensorHeight;
++
+     /** Stream manipulation */
+     uint32_t mNextStreamId;
+     uint32_t mRawStreamCount;
+diff --git a/camera/EmulatedFakeCamera3.cpp b/camera/EmulatedFakeCamera3.cpp
+index 0e305f9..6aa3c5b 100644
+--- a/camera/EmulatedFakeCamera3.cpp
++++ b/camera/EmulatedFakeCamera3.cpp
+@@ -30,9 +30,7 @@
+ #include "EmulatedFakeCamera3.h"
+ #include "EmulatedCameraFactory.h"
+ #include <ui/Fence.h>
+-#include <ui/Rect.h>
+-#include <ui/GraphicBufferMapper.h>
+-#include "gralloc_cb.h"
++#include "GrallocModule.h"
+ 
+ #include "fake-pipeline2/Sensor.h"
+ #include "fake-pipeline2/JpegCompressor.h"
+@@ -68,6 +66,12 @@ const int32_t EmulatedFakeCamera3::kAvailableFormats[] = {
+         HAL_PIXEL_FORMAT_Y16
+ };
+ 
++const uint32_t EmulatedFakeCamera3::kAvailableRawSizes[2] = {
++    640, 480
++    //    mSensorWidth, mSensorHeight
++};
++
++
+ /**
+  * 3A constants
+  */
+@@ -77,7 +81,8 @@ const nsecs_t EmulatedFakeCamera3::kNormalExposureTime       = 10 * MSEC;
+ const nsecs_t EmulatedFakeCamera3::kFacePriorityExposureTime = 30 * MSEC;
+ const int     EmulatedFakeCamera3::kNormalSensitivity        = 100;
+ const int     EmulatedFakeCamera3::kFacePrioritySensitivity  = 400;
+-const float   EmulatedFakeCamera3::kExposureTrackRate        = 0.1;
++//CTS requires 8 frames timeout in waitForAeStable
++const float   EmulatedFakeCamera3::kExposureTrackRate        = 0.2;
+ const int     EmulatedFakeCamera3::kPrecaptureMinFrames      = 10;
+ const int     EmulatedFakeCamera3::kStableAeMaxFrames        = 100;
+ const float   EmulatedFakeCamera3::kExposureWanderMin        = -2;
+@@ -97,7 +102,6 @@ EmulatedFakeCamera3::EmulatedFakeCamera3(int cameraId, bool facingBack,
+     for (size_t i = 0; i < CAMERA3_TEMPLATE_COUNT; i++) {
+         mDefaultTemplates[i] = NULL;
+     }
+-
+ }
+ 
+ EmulatedFakeCamera3::~EmulatedFakeCamera3() {
+@@ -144,7 +148,7 @@ status_t EmulatedFakeCamera3::connectCamera(hw_device_t** device) {
+         return INVALID_OPERATION;
+     }
+ 
+-    mSensor = new Sensor();
++    mSensor = new Sensor(mSensorWidth, mSensorHeight);
+     mSensor->setSensorListener(this);
+ 
+     res = mSensor->startUp();
+@@ -536,7 +540,7 @@ const camera_metadata_t* EmulatedFakeCamera3::constructDefaultRequestSettings(
+     /** android.scaler */
+     if (hasCapability(BACKWARD_COMPATIBLE)) {
+         static const int32_t cropRegion[4] = {
+-            0, 0, (int32_t)Sensor::kResolution[0], (int32_t)Sensor::kResolution[1]
++            0, 0, mSensorWidth, mSensorHeight
+         };
+         settings.update(ANDROID_SCALER_CROP_REGION, cropRegion, 4);
+     }
+@@ -666,28 +670,33 @@ const camera_metadata_t* EmulatedFakeCamera3::constructDefaultRequestSettings(
+         settings.update(ANDROID_CONTROL_AWB_LOCK, &awbLock, 1);
+ 
+         uint8_t afMode = 0;
+-        switch (type) {
+-            case CAMERA3_TEMPLATE_PREVIEW:
+-                afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+-                break;
+-            case CAMERA3_TEMPLATE_STILL_CAPTURE:
+-                afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+-                break;
+-            case CAMERA3_TEMPLATE_VIDEO_RECORD:
+-                afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO;
+-                break;
+-            case CAMERA3_TEMPLATE_VIDEO_SNAPSHOT:
+-                afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO;
+-                break;
+-            case CAMERA3_TEMPLATE_ZERO_SHUTTER_LAG:
+-                afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+-                break;
+-            case CAMERA3_TEMPLATE_MANUAL:
+-                afMode = ANDROID_CONTROL_AF_MODE_OFF;
+-                break;
+-            default:
+-                afMode = ANDROID_CONTROL_AF_MODE_AUTO;
+-                break;
++
++        if (mFacingBack) {
++            switch (type) {
++                case CAMERA3_TEMPLATE_PREVIEW:
++                    afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
++                    break;
++                case CAMERA3_TEMPLATE_STILL_CAPTURE:
++                    afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
++                    break;
++                case CAMERA3_TEMPLATE_VIDEO_RECORD:
++                    afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO;
++                    break;
++                case CAMERA3_TEMPLATE_VIDEO_SNAPSHOT:
++                    afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO;
++                    break;
++                case CAMERA3_TEMPLATE_ZERO_SHUTTER_LAG:
++                    afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
++                    break;
++                case CAMERA3_TEMPLATE_MANUAL:
++                    afMode = ANDROID_CONTROL_AF_MODE_OFF;
++                    break;
++                default:
++                    afMode = ANDROID_CONTROL_AF_MODE_AUTO;
++                    break;
++            }
++        } else {
++            afMode = ANDROID_CONTROL_AF_MODE_OFF;
+         }
+         settings.update(ANDROID_CONTROL_AF_MODE, &afMode, 1);
+ 
+@@ -863,18 +872,15 @@ status_t EmulatedFakeCamera3::processCaptureRequest(
+     // structures for them, and lock them for writing.
+     for (size_t i = 0; i < request->num_output_buffers; i++) {
+         const camera3_stream_buffer &srcBuf = request->output_buffers[i];
+-        const cb_handle_t *privBuffer =
+-                static_cast<const cb_handle_t*>(*srcBuf.buffer);
+-        if (!cb_handle_t::validate(privBuffer)) {
+-          privBuffer = nullptr;
+-        }
+         StreamBuffer destBuf;
+         destBuf.streamId = kGenericStreamId;
+         destBuf.width    = srcBuf.stream->width;
+         destBuf.height   = srcBuf.stream->height;
+-        // If we have more specific format information, use it.
+-        destBuf.format = (privBuffer) ? privBuffer->format : srcBuf.stream->format;
+-        destBuf.stride   = srcBuf.stream->width; // TODO: query from gralloc
++        // For goldfish, IMPLEMENTATION_DEFINED is always RGBx_8888
++        destBuf.format = (srcBuf.stream->format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) ?
++                HAL_PIXEL_FORMAT_RGBA_8888 :
++                srcBuf.stream->format;
++        destBuf.stride   = srcBuf.stream->width;
+         destBuf.dataSpace = srcBuf.stream->data_space;
+         destBuf.buffer   = srcBuf.buffer;
+ 
+@@ -891,13 +897,13 @@ status_t EmulatedFakeCamera3::processCaptureRequest(
+         }
+         if (res == OK) {
+             // Lock buffer for writing
+-            const Rect rect(destBuf.width, destBuf.height);
+             if (srcBuf.stream->format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
+-                if (destBuf.format == HAL_PIXEL_FORMAT_YCrCb_420_SP) {
++                if (destBuf.format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
+                     android_ycbcr ycbcr = android_ycbcr();
+-                    res = GraphicBufferMapper::get().lockYCbCr(
++                    res = GrallocModule::getInstance().lock_ycbcr(
+                         *(destBuf.buffer),
+-                        GRALLOC_USAGE_HW_CAMERA_WRITE, rect,
++                        GRALLOC_USAGE_HW_CAMERA_WRITE,
++                        0, 0, destBuf.width, destBuf.height,
+                         &ycbcr);
+                     // This is only valid because we know that emulator's
+                     // YCbCr_420_888 is really contiguous NV21 under the hood
+@@ -908,9 +914,12 @@ status_t EmulatedFakeCamera3::processCaptureRequest(
+                     res = INVALID_OPERATION;
+                 }
+             } else {
+-                res = GraphicBufferMapper::get().lock(*(destBuf.buffer),
+-                        GRALLOC_USAGE_HW_CAMERA_WRITE, rect,
+-                        (void**)&(destBuf.img));
++                res = GrallocModule::getInstance().lock(
++                    *(destBuf.buffer),
++                    GRALLOC_USAGE_HW_CAMERA_WRITE,
++                    0, 0, destBuf.width, destBuf.height,
++                    (void**)&(destBuf.img));
++
+             }
+             if (res != OK) {
+                 ALOGE("%s: Request %d: Buffer %zu: Unable to lock buffer",
+@@ -922,7 +931,7 @@ status_t EmulatedFakeCamera3::processCaptureRequest(
+             // Either waiting or locking failed. Unlock locked buffers and bail
+             // out.
+             for (size_t j = 0; j < i; j++) {
+-                GraphicBufferMapper::get().unlock(
++                GrallocModule::getInstance().unlock(
+                         *(request->output_buffers[i].buffer));
+             }
+             delete sensorBuffers;
+@@ -938,12 +947,17 @@ status_t EmulatedFakeCamera3::processCaptureRequest(
+      * Wait for JPEG compressor to not be busy, if needed
+      */
+     if (needJpeg) {
+-        bool ready = mJpegCompressor->waitForDone(kFenceTimeoutMs);
++        bool ready = mJpegCompressor->waitForDone(kJpegTimeoutNs);
+         if (!ready) {
+             ALOGE("%s: Timeout waiting for JPEG compression to complete!",
+                     __FUNCTION__);
+             return NO_INIT;
+         }
++        res = mJpegCompressor->reserve();
++        if (res != OK) {
++            ALOGE("%s: Error managing JPEG compressor resources, can't reserve it!", __FUNCTION__);
++            return NO_INIT;
++        }
+     }
+ 
+     /**
+@@ -1083,6 +1097,24 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+     Vector<int32_t> availableCharacteristicsKeys;
+     status_t res;
+ 
++    // Find max width/height
++    int32_t width = 0, height = 0;
++    size_t rawSizeCount = sizeof(kAvailableRawSizes)/sizeof(kAvailableRawSizes[0]);
++    for (size_t index = 0; index + 1 < rawSizeCount; index += 2) {
++        if (width <= kAvailableRawSizes[index] &&
++            height <= kAvailableRawSizes[index+1]) {
++            width = kAvailableRawSizes[index];
++            height = kAvailableRawSizes[index+1];
++        }
++    }
++
++    if (width < 640 || height < 480) {
++        width = 640;
++        height = 480;
++    }
++    mSensorWidth = width;
++    mSensorHeight = height;
++
+ #define ADD_STATIC_ENTRY(name, varptr, count) \
+         availableCharacteristicsKeys.add(name);   \
+         res = info.update(name, varptr, count); \
+@@ -1111,11 +1143,12 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+     ADD_STATIC_ENTRY(ANDROID_SENSOR_INFO_PHYSICAL_SIZE,
+             sensorPhysicalSize, 2);
+ 
++    const int32_t pixelArray[] = {mSensorWidth, mSensorHeight};
+     ADD_STATIC_ENTRY(ANDROID_SENSOR_INFO_PIXEL_ARRAY_SIZE,
+-            (int32_t*)Sensor::kResolution, 2);
+-
++            pixelArray, 2);
++    const int32_t activeArray[] = {0, 0, mSensorWidth, mSensorHeight};
+     ADD_STATIC_ENTRY(ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE,
+-            (int32_t*)Sensor::kActiveArray, 4);
++            activeArray, 4);
+ 
+     static const int32_t orientation = 90; // Aligned with 'long edge'
+     ADD_STATIC_ENTRY(ANDROID_SENSOR_ORIENTATION, &orientation, 1);
+@@ -1210,10 +1243,10 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+                 sizeof(lensPoseTranslation)/sizeof(float));
+ 
+         // Intrinsics are 'ideal' (f_x, f_y, c_x, c_y, s) match focal length and active array size
+-        float f_x = focalLength * Sensor::kActiveArray[2] / sensorPhysicalSize[0];
+-        float f_y = focalLength * Sensor::kActiveArray[3] / sensorPhysicalSize[1];
+-        float c_x = Sensor::kActiveArray[2] / 2.f;
+-        float c_y = Sensor::kActiveArray[3] / 2.f;
++        float f_x = focalLength * mSensorWidth / sensorPhysicalSize[0];
++        float f_y = focalLength * mSensorHeight / sensorPhysicalSize[1];
++        float c_x = mSensorWidth / 2.f;
++        float c_y = mSensorHeight / 2.f;
+         float s = 0.f;
+         const float lensIntrinsics[] = { f_x, f_y, c_x, c_y, s };
+ 
+@@ -1256,18 +1289,27 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+     // android.scaler
+ 
+     const std::vector<int32_t> availableStreamConfigurationsBasic = {
++        HAL_PIXEL_FORMAT_BLOB, width, height, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+         HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 320, 240, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+         HAL_PIXEL_FORMAT_YCbCr_420_888, 320, 240, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+-        HAL_PIXEL_FORMAT_RGBA_8888, 320, 240, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
++        HAL_PIXEL_FORMAT_BLOB, 320, 240, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
++    };
++
++    // Always need to include 640x480 in basic formats
++    const std::vector<int32_t> availableStreamConfigurationsBasic640 = {
++        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
++        HAL_PIXEL_FORMAT_YCbCr_420_888, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+         HAL_PIXEL_FORMAT_BLOB, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT
+     };
++
+     const std::vector<int32_t> availableStreamConfigurationsRaw = {
+-        HAL_PIXEL_FORMAT_RAW16, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT
++        HAL_PIXEL_FORMAT_RAW16, width, height, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+     };
++
+     const std::vector<int32_t> availableStreamConfigurationsBurst = {
+-        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+-        HAL_PIXEL_FORMAT_YCbCr_420_888, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+-        HAL_PIXEL_FORMAT_RGBA_8888, 640, 480, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT
++        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, width, height, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
++        HAL_PIXEL_FORMAT_YCbCr_420_888, width, height, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
++        HAL_PIXEL_FORMAT_RGBA_8888, width, height, ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT,
+     };
+ 
+     std::vector<int32_t> availableStreamConfigurations;
+@@ -1276,6 +1318,11 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+         availableStreamConfigurations.insert(availableStreamConfigurations.end(),
+                 availableStreamConfigurationsBasic.begin(),
+                 availableStreamConfigurationsBasic.end());
++        if (width > 640) {
++            availableStreamConfigurations.insert(availableStreamConfigurations.end(),
++                    availableStreamConfigurationsBasic640.begin(),
++                    availableStreamConfigurationsBasic640.end());
++        }
+     }
+     if (hasCapability(RAW)) {
+         availableStreamConfigurations.insert(availableStreamConfigurations.end(),
+@@ -1295,18 +1342,27 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+     }
+ 
+     const std::vector<int64_t> availableMinFrameDurationsBasic = {
++        HAL_PIXEL_FORMAT_BLOB, width, height, Sensor::kFrameDurationRange[0],
+         HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 320, 240, Sensor::kFrameDurationRange[0],
+         HAL_PIXEL_FORMAT_YCbCr_420_888, 320, 240, Sensor::kFrameDurationRange[0],
+-        HAL_PIXEL_FORMAT_RGBA_8888, 320, 240, Sensor::kFrameDurationRange[0],
++        HAL_PIXEL_FORMAT_BLOB, 320, 240, Sensor::kFrameDurationRange[0],
++    };
++
++    // Always need to include 640x480 in basic formats
++    const std::vector<int64_t> availableMinFrameDurationsBasic640 = {
++        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 640, 480, Sensor::kFrameDurationRange[0],
++        HAL_PIXEL_FORMAT_YCbCr_420_888, 640, 480, Sensor::kFrameDurationRange[0],
+         HAL_PIXEL_FORMAT_BLOB, 640, 480, Sensor::kFrameDurationRange[0]
+     };
++
+     const std::vector<int64_t> availableMinFrameDurationsRaw = {
+-        HAL_PIXEL_FORMAT_RAW16, 640, 480, Sensor::kFrameDurationRange[0]
++        HAL_PIXEL_FORMAT_RAW16, width, height, Sensor::kFrameDurationRange[0],
+     };
++
+     const std::vector<int64_t> availableMinFrameDurationsBurst = {
+-        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 640, 480, Sensor::kFrameDurationRange[0],
+-        HAL_PIXEL_FORMAT_YCbCr_420_888, 640, 480, Sensor::kFrameDurationRange[0],
+-        HAL_PIXEL_FORMAT_RGBA_8888, 640, 480, Sensor::kFrameDurationRange[0],
++        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, width, height, Sensor::kFrameDurationRange[0],
++        HAL_PIXEL_FORMAT_YCbCr_420_888, width, height, Sensor::kFrameDurationRange[0],
++        HAL_PIXEL_FORMAT_RGBA_8888, width, height, Sensor::kFrameDurationRange[0],
+     };
+ 
+     std::vector<int64_t> availableMinFrameDurations;
+@@ -1315,6 +1371,11 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+         availableMinFrameDurations.insert(availableMinFrameDurations.end(),
+                 availableMinFrameDurationsBasic.begin(),
+                 availableMinFrameDurationsBasic.end());
++        if (width > 640) {
++            availableMinFrameDurations.insert(availableMinFrameDurations.end(),
++                    availableMinFrameDurationsBasic640.begin(),
++                    availableMinFrameDurationsBasic640.end());
++        }
+     }
+     if (hasCapability(RAW)) {
+         availableMinFrameDurations.insert(availableMinFrameDurations.end(),
+@@ -1334,11 +1395,19 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+     }
+ 
+     const std::vector<int64_t> availableStallDurationsBasic = {
++        HAL_PIXEL_FORMAT_BLOB, width, height, Sensor::kFrameDurationRange[0],
+         HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 320, 240, 0,
+         HAL_PIXEL_FORMAT_YCbCr_420_888, 320, 240, 0,
+         HAL_PIXEL_FORMAT_RGBA_8888, 320, 240, 0,
++    };
++
++    // Always need to include 640x480 in basic formats
++    const std::vector<int64_t> availableStallDurationsBasic640 = {
++        HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED, 640, 480, 0,
++        HAL_PIXEL_FORMAT_YCbCr_420_888, 640, 480, 0,
+         HAL_PIXEL_FORMAT_BLOB, 640, 480, Sensor::kFrameDurationRange[0]
+     };
++
+     const std::vector<int64_t> availableStallDurationsRaw = {
+         HAL_PIXEL_FORMAT_RAW16, 640, 480, Sensor::kFrameDurationRange[0]
+     };
+@@ -1354,6 +1423,11 @@ status_t EmulatedFakeCamera3::constructStaticInfo() {
+         availableStallDurations.insert(availableStallDurations.end(),
+                 availableStallDurationsBasic.begin(),
+                 availableStallDurationsBasic.end());
++        if (width > 640) {
++            availableStallDurations.insert(availableStallDurations.end(),
++                    availableStallDurationsBasic640.begin(),
++                    availableStallDurationsBasic640.end());
++        }
+     }
+     if (hasCapability(RAW)) {
+         availableStallDurations.insert(availableStallDurations.end(),
+@@ -1786,6 +1860,9 @@ status_t EmulatedFakeCamera3::process3A(CameraMetadata &settings) {
+     uint8_t controlMode = e.data.u8[0];
+ 
+     if (controlMode == ANDROID_CONTROL_MODE_OFF) {
++        mAeMode   = ANDROID_CONTROL_AE_MODE_OFF;
++        mAfMode   = ANDROID_CONTROL_AF_MODE_OFF;
++        mAwbMode  = ANDROID_CONTROL_AWB_MODE_OFF;
+         mAeState  = ANDROID_CONTROL_AE_STATE_INACTIVE;
+         mAfState  = ANDROID_CONTROL_AF_STATE_INACTIVE;
+         mAwbState = ANDROID_CONTROL_AWB_STATE_INACTIVE;
+@@ -1843,6 +1920,7 @@ status_t EmulatedFakeCamera3::doFakeAE(CameraMetadata &settings) {
+         return BAD_VALUE;
+     }
+     uint8_t aeMode = (e.count > 0) ? e.data.u8[0] : (uint8_t)ANDROID_CONTROL_AE_MODE_ON;
++    mAeMode = aeMode;
+ 
+     switch (aeMode) {
+         case ANDROID_CONTROL_AE_MODE_OFF:
+@@ -1908,8 +1986,10 @@ status_t EmulatedFakeCamera3::doFakeAE(CameraMetadata &settings) {
+     } else if (!aeLocked) {
+         // Run standard occasional AE scan
+         switch (mAeState) {
+-            case ANDROID_CONTROL_AE_STATE_CONVERGED:
+             case ANDROID_CONTROL_AE_STATE_INACTIVE:
++                mAeState = ANDROID_CONTROL_AE_STATE_SEARCHING;
++                break;
++            case ANDROID_CONTROL_AE_STATE_CONVERGED:
+                 mAeCounter++;
+                 if (mAeCounter > kStableAeMaxFrames) {
+                     mAeTargetExposureTime =
+@@ -2171,16 +2251,21 @@ status_t EmulatedFakeCamera3::doFakeAWB(CameraMetadata &settings) {
+ 
+     // TODO: Add white balance simulation
+ 
++    e = settings.find(ANDROID_CONTROL_AWB_LOCK);
++    bool awbLocked = (e.count > 0) ? (e.data.u8[0] == ANDROID_CONTROL_AWB_LOCK_ON) : false;
++
+     switch (awbMode) {
+         case ANDROID_CONTROL_AWB_MODE_OFF:
+             mAwbState = ANDROID_CONTROL_AWB_STATE_INACTIVE;
+-            return OK;
++            break;
+         case ANDROID_CONTROL_AWB_MODE_AUTO:
+         case ANDROID_CONTROL_AWB_MODE_INCANDESCENT:
+         case ANDROID_CONTROL_AWB_MODE_FLUORESCENT:
+         case ANDROID_CONTROL_AWB_MODE_DAYLIGHT:
+         case ANDROID_CONTROL_AWB_MODE_SHADE:
+-            // OK
++            // Always magically right, or locked
++            mAwbState = awbLocked ? ANDROID_CONTROL_AWB_STATE_LOCKED :
++                    ANDROID_CONTROL_AWB_STATE_CONVERGED;
+             break;
+         default:
+             ALOGE("%s: Emulator doesn't support AWB mode %d",
+@@ -2387,7 +2472,7 @@ bool EmulatedFakeCamera3::ReadoutThread::threadLoop() {
+                         __FUNCTION__, strerror(-res), res);
+             // fallthrough for cleanup
+         }
+-        GraphicBufferMapper::get().unlock(*(buf->buffer));
++        GrallocModule::getInstance().unlock(*(buf->buffer));
+ 
+         buf->status = goodBuffer ? CAMERA3_BUFFER_STATUS_OK :
+                 CAMERA3_BUFFER_STATUS_ERROR;
+@@ -2489,7 +2574,7 @@ void EmulatedFakeCamera3::ReadoutThread::onJpegDone(
+         const StreamBuffer &jpegBuffer, bool success) {
+     Mutex::Autolock jl(mJpegLock);
+ 
+-    GraphicBufferMapper::get().unlock(*(jpegBuffer.buffer));
++    GrallocModule::getInstance().unlock(*(jpegBuffer.buffer));
+ 
+     mJpegHalBuffer.status = success ?
+             CAMERA3_BUFFER_STATUS_OK : CAMERA3_BUFFER_STATUS_ERROR;
+@@ -2498,10 +2583,13 @@ void EmulatedFakeCamera3::ReadoutThread::onJpegDone(
+     mJpegWaiting = false;
+ 
+     camera3_capture_result result;
++
+     result.frame_number = mJpegFrameNumber;
+     result.result = NULL;
+     result.num_output_buffers = 1;
+     result.output_buffers = &mJpegHalBuffer;
++    result.input_buffer = nullptr;
++    result.partial_result = 0;
+ 
+     if (!success) {
+         ALOGE("%s: Compression failure, returning error state buffer to"
+diff --git a/camera/EmulatedFakeCamera3.h b/camera/EmulatedFakeCamera3.h
+index 4835009..3921178 100644
+--- a/camera/EmulatedFakeCamera3.h
++++ b/camera/EmulatedFakeCamera3.h
+@@ -139,10 +139,11 @@ private:
+     // no concept of a stream id.
+     static const uint32_t kGenericStreamId = 1;
+     static const int32_t  kAvailableFormats[];
+-
++    static const uint32_t kAvailableRawSizes[];
+     static const int64_t  kSyncWaitTimeout     = 10000000; // 10 ms
+     static const int32_t  kMaxSyncTimeoutCount = 1000; // 1000 kSyncWaitTimeouts
+     static const uint32_t kFenceTimeoutMs      = 2000; // 2 s
++    static const nsecs_t  kJpegTimeoutNs       = 5000000000l; // 5 s
+ 
+     /****************************************************************************
+      * Data members.
+@@ -153,6 +154,8 @@ private:
+ 
+     /* Facing back (true) or front (false) switch. */
+     bool               mFacingBack;
++    int32_t            mSensorWidth;
++    int32_t            mSensorHeight;
+ 
+     SortedVector<AvailableCapabilities> mCapabilities;
+ 
+diff --git a/camera/EmulatedQemuCamera.cpp b/camera/EmulatedQemuCamera.cpp
+index ce47f07..eb2c4be 100755
+--- a/camera/EmulatedQemuCamera.cpp
++++ b/camera/EmulatedQemuCamera.cpp
+@@ -138,6 +138,8 @@ status_t EmulatedQemuCamera::Initialize(const char* device_name,
+     mParameters.set(EmulatedCamera::FACING_KEY, facing_dir);
+     mParameters.set(EmulatedCamera::ORIENTATION_KEY,
+                     gEmulatedCameraFactory.getQemuCameraOrientation());
++    mParameters.set(CameraParameters::KEY_ROTATION,
++                    gEmulatedCameraFactory.getQemuCameraOrientation());
+     mParameters.set(CameraParameters::KEY_SUPPORTED_PICTURE_SIZES,
+                     sizes.c_str());
+     mParameters.set(CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES,
+diff --git a/camera/Exif.cpp b/camera/Exif.cpp
+index aa58f4b..d444824 100644
+--- a/camera/Exif.cpp
++++ b/camera/Exif.cpp
+@@ -280,11 +280,16 @@ ExifData* createExifData(const CameraParameters& params) {
+     float triplet[3];
+     float floatValue = 0.0f;
+     const char* stringValue;
++    int64_t degrees;
+ 
+     // Datetime, creating and initializing a datetime tag will automatically
+     // set the current date and time in the tag so just do that.
+     createEntry(exifData, EXIF_IFD_0, EXIF_TAG_DATE_TIME);
+ 
++    // Make and model
++    createEntry(exifData, EXIF_IFD_0, EXIF_TAG_MAKE, "Emulator-Goldfish");
++    createEntry(exifData, EXIF_IFD_0, EXIF_TAG_MODEL, "Emulator-Goldfish");
++
+     // Picture size
+     int width = -1, height = -1;
+     params.getPictureSize(&width, &height);
+@@ -294,6 +299,38 @@ ExifData* createExifData(const CameraParameters& params) {
+         createEntry(exifData, EXIF_IFD_EXIF,
+                     EXIF_TAG_PIXEL_Y_DIMENSION, height);
+     }
++    // Orientation
++    if (getCameraParam(params,
++                       CameraParameters::KEY_ROTATION,
++                       &degrees)) {
++        // Exif orientation values, please refer to
++        // http://www.exif.org/Exif2-2.PDF, Section 4.6.4-A-Orientation
++        // Or these websites:
++        // http://sylvana.net/jpegcrop/exif_orientation.html
++        // http://www.impulseadventure.com/photo/exif-orientation.html
++        enum {
++            EXIF_ROTATE_CAMERA_CW0 = 1,
++            EXIF_ROTATE_CAMERA_CW90 = 6,
++            EXIF_ROTATE_CAMERA_CW180 = 3,
++            EXIF_ROTATE_CAMERA_CW270 = 8,
++        };
++        uint16_t exifOrien = 1;
++        switch (degrees) {
++            case 0:
++                exifOrien = EXIF_ROTATE_CAMERA_CW0;
++                break;
++            case 90:
++                exifOrien = EXIF_ROTATE_CAMERA_CW90;
++                break;
++            case 180:
++                exifOrien = EXIF_ROTATE_CAMERA_CW180;
++                break;
++            case 270:
++                exifOrien = EXIF_ROTATE_CAMERA_CW270;
++                break;
++        }
++        createEntry(exifData, EXIF_IFD_0, EXIF_TAG_ORIENTATION, exifOrien);
++    }
+     // Focal length
+     if (getCameraParam(params,
+                        CameraParameters::KEY_FOCAL_LENGTH,
+diff --git a/camera/GrallocModule.h b/camera/GrallocModule.h
+new file mode 100644
+index 0000000..1f5a8f2
+--- /dev/null
++++ b/camera/GrallocModule.h
+@@ -0,0 +1,43 @@
++#ifndef EMU_CAMERA_GRALLOC_MODULE_H
++#define EMU_CAMERA_GRALLOC_MODULE_H
++
++#include <hardware/gralloc.h>
++
++class GrallocModule
++{
++public:
++  static GrallocModule &getInstance() {
++    static GrallocModule instance;
++    return instance;
++  }
++
++  int lock(buffer_handle_t handle,
++      int usage, int l, int t, int w, int h, void **vaddr) {
++    return mModule->lock(mModule, handle, usage, l, t, w, h, vaddr);
++  }
++
++#ifdef GRALLOC_MODULE_API_VERSION_0_2
++  int lock_ycbcr(buffer_handle_t handle,
++      int usage, int l, int t, int w, int h,
++      struct android_ycbcr *ycbcr) {
++    return mModule->lock_ycbcr(mModule, handle, usage, l, t, w, h, ycbcr);
++  }
++#endif
++
++  int unlock(buffer_handle_t handle) {
++    return mModule->unlock(mModule, handle);
++  }
++
++private:
++  GrallocModule() {
++    const hw_module_t *module = NULL;
++    int ret = hw_get_module(GRALLOC_HARDWARE_MODULE_ID, &module);
++    if (ret) {
++      ALOGE("%s: Failed to get gralloc module: %d", __FUNCTION__, ret);
++    }
++    mModule = reinterpret_cast<const gralloc_module_t*>(module);
++  }
++  const gralloc_module_t *mModule;
++};
++
++#endif
+diff --git a/camera/JpegCompressor.cpp b/camera/JpegCompressor.cpp
+index 9694ca3..d757a3d 100644
+--- a/camera/JpegCompressor.cpp
++++ b/camera/JpegCompressor.cpp
+@@ -46,7 +46,7 @@ typedef size_t (*GetCompressedSizeFunc)(JpegStub* stub);
+ 
+ NV21JpegCompressor::NV21JpegCompressor()
+ {
+-    const char dlName[] = "/system/lib/hw/camera.goldfish.jpeg.so";
++    const char dlName[] = "/vendor/lib/hw/camera.goldfish.jpeg.so";
+     if (mDl == NULL) {
+         mDl = dlopen(dlName, RTLD_NOW);
+     }
+diff --git a/camera/PreviewWindow.cpp b/camera/PreviewWindow.cpp
+index 68d3d5d..607ad7d 100755
+--- a/camera/PreviewWindow.cpp
++++ b/camera/PreviewWindow.cpp
+@@ -22,10 +22,9 @@
+ #define LOG_NDEBUG 0
+ #define LOG_TAG "EmulatedCamera_Preview"
+ #include <cutils/log.h>
+-#include <ui/Rect.h>
+-#include <ui/GraphicBufferMapper.h>
+ #include "EmulatedCameraDevice.h"
+ #include "PreviewWindow.h"
++#include "GrallocModule.h"
+ 
+ namespace android {
+ 
+@@ -150,11 +149,11 @@ void PreviewWindow::onNextFrameAvailable(nsecs_t timestamp,
+     /* Now let the graphics framework to lock the buffer, and provide
+      * us with the framebuffer data address. */
+     void* img = NULL;
+-    const Rect rect(mPreviewFrameWidth, mPreviewFrameHeight);
+-    GraphicBufferMapper& grbuffer_mapper(GraphicBufferMapper::get());
+-    res = grbuffer_mapper.lock(*buffer, GRALLOC_USAGE_SW_WRITE_OFTEN, rect, &img);
++    res = GrallocModule::getInstance().lock(
++        *buffer, GRALLOC_USAGE_SW_WRITE_OFTEN,
++        0, 0, mPreviewFrameWidth, mPreviewFrameHeight, &img);
+     if (res != NO_ERROR) {
+-        ALOGE("%s: grbuffer_mapper.lock failure: %d -> %s",
++        ALOGE("%s: gralloc.lock failure: %d -> %s",
+              __FUNCTION__, res, strerror(res));
+         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
+         return;
+@@ -171,7 +170,7 @@ void PreviewWindow::onNextFrameAvailable(nsecs_t timestamp,
+         ALOGE("%s: Unable to obtain preview frame: %d", __FUNCTION__, res);
+         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
+     }
+-    grbuffer_mapper.unlock(*buffer);
++    GrallocModule::getInstance().unlock(*buffer);
+ }
+ 
+ /***************************************************************************
+diff --git a/camera/fake-pipeline2/JpegCompressor.cpp b/camera/fake-pipeline2/JpegCompressor.cpp
+index d0dce26..5dad236 100644
+--- a/camera/fake-pipeline2/JpegCompressor.cpp
++++ b/camera/fake-pipeline2/JpegCompressor.cpp
+@@ -18,7 +18,6 @@
+ #define LOG_TAG "EmulatedCamera2_JpegCompressor"
+ 
+ #include <utils/Log.h>
+-#include <ui/GraphicBufferMapper.h>
+ 
+ #include "JpegCompressor.h"
+ #include "../EmulatedFakeCamera2.h"
+@@ -38,6 +37,16 @@ JpegCompressor::~JpegCompressor() {
+     Mutex::Autolock lock(mMutex);
+ }
+ 
++status_t JpegCompressor::reserve() {
++    Mutex::Autolock busyLock(mBusyMutex);
++    if (mIsBusy) {
++        ALOGE("%s: Already processing a buffer!", __FUNCTION__);
++        return INVALID_OPERATION;
++    }
++    mIsBusy = true;
++    return OK;
++}
++
+ status_t JpegCompressor::start(Buffers *buffers, JpegListener *listener) {
+     if (listener == NULL) {
+         ALOGE("%s: NULL listener not allowed!", __FUNCTION__);
+@@ -47,12 +56,10 @@ status_t JpegCompressor::start(Buffers *buffers, JpegListener *listener) {
+     {
+         Mutex::Autolock busyLock(mBusyMutex);
+ 
+-        if (mIsBusy) {
+-            ALOGE("%s: Already processing a buffer!", __FUNCTION__);
++        if (!mIsBusy) {
++            ALOGE("Called start without reserve() first!");
+             return INVALID_OPERATION;
+         }
+-
+-        mIsBusy = true;
+         mSynchronous = false;
+         mBuffers = buffers;
+         mListener = listener;
+@@ -117,7 +124,6 @@ bool JpegCompressor::threadLoop() {
+ status_t JpegCompressor::compress() {
+     // Find source and target buffers. Assumes only one buffer matches
+     // each condition!
+-
+     bool foundJpeg = false, mFoundAux = false;
+     for (size_t i = 0; i < mBuffers->size(); i++) {
+         const StreamBuffer &b = (*mBuffers)[i];
+@@ -215,11 +221,11 @@ bool JpegCompressor::isStreamInUse(uint32_t id) {
+ 
+ bool JpegCompressor::waitForDone(nsecs_t timeout) {
+     Mutex::Autolock lock(mBusyMutex);
+-    status_t res = OK;
+-    if (mIsBusy) {
+-        res = mDone.waitRelative(mBusyMutex, timeout);
++    while (mIsBusy) {
++        status_t res = mDone.waitRelative(mBusyMutex, timeout);
++        if (res != OK) return false;
+     }
+-    return (res == OK);
++    return true;
+ }
+ 
+ bool JpegCompressor::checkError(const char *msg) {
+diff --git a/camera/fake-pipeline2/JpegCompressor.h b/camera/fake-pipeline2/JpegCompressor.h
+index ff6f8a4..597cbdf 100644
+--- a/camera/fake-pipeline2/JpegCompressor.h
++++ b/camera/fake-pipeline2/JpegCompressor.h
+@@ -56,6 +56,7 @@ class JpegCompressor: private Thread, public virtual RefBase {
+ 
+     // Start compressing COMPRESSED format buffers; JpegCompressor takes
+     // ownership of the Buffers vector.
++    // Reserve() must be called first.
+     status_t start(Buffers *buffers, JpegListener *listener);
+ 
+     // Compress and block until buffer is complete.
+@@ -68,6 +69,9 @@ class JpegCompressor: private Thread, public virtual RefBase {
+ 
+     bool waitForDone(nsecs_t timeout);
+ 
++    // Reserve the compressor for a later start() call.
++    status_t reserve();
++
+     // TODO: Measure this
+     static const size_t kMaxJpegSize = 300000;
+ 
+diff --git a/camera/fake-pipeline2/Sensor.cpp b/camera/fake-pipeline2/Sensor.cpp
+index 61c7f28..02c6835 100644
+--- a/camera/fake-pipeline2/Sensor.cpp
++++ b/camera/fake-pipeline2/Sensor.cpp
+@@ -34,9 +34,6 @@
+ 
+ namespace android {
+ 
+-const unsigned int Sensor::kResolution[2]  = {640, 480};
+-const unsigned int Sensor::kActiveArray[4]  = {0, 0, 640, 480};
+-
+ //const nsecs_t Sensor::kExposureTimeRange[2] =
+ //    {1000L, 30000000000L} ; // 1 us - 30 sec
+ //const nsecs_t Sensor::kFrameDurationRange[2] =
+@@ -76,13 +73,6 @@ const float Sensor::kReadNoiseVarAfterGain =
+             Sensor::kReadNoiseStddevAfterGain *
+             Sensor::kReadNoiseStddevAfterGain;
+ 
+-// While each row has to read out, reset, and then expose, the (reset +
+-// expose) sequence can be overlapped by other row readouts, so the final
+-// minimum frame duration is purely a function of row readout time, at least
+-// if there's a reasonable number of rows.
+-const nsecs_t Sensor::kRowReadoutTime =
+-            Sensor::kFrameDurationRange[0] / Sensor::kResolution[1];
+-
+ const int32_t Sensor::kSensitivityRange[2] = {100, 1600};
+ const uint32_t Sensor::kDefaultSensitivity = 100;
+ 
+@@ -105,8 +95,11 @@ float sqrtf_approx(float r) {
+ 
+ 
+ 
+-Sensor::Sensor():
++Sensor::Sensor(uint32_t width, uint32_t height):
+         Thread(false),
++        mResolution{width, height},
++        mActiveArray{0, 0, width, height},
++        mRowReadoutTime(kFrameDurationRange[0] / height),
+         mGotVSync(false),
+         mExposureTime(kFrameDurationRange[0]-kMinVerticalBlank),
+         mFrameDuration(kFrameDurationRange[0]),
+@@ -115,9 +108,9 @@ Sensor::Sensor():
+         mFrameNumber(0),
+         mCapturedBuffers(NULL),
+         mListener(NULL),
+-        mScene(kResolution[0], kResolution[1], kElectronsPerLuxSecond)
++        mScene(width, height, kElectronsPerLuxSecond)
+ {
+-
++    ALOGV("Sensor created with pixel array %d x %d", width, height);
+ }
+ 
+ Sensor::~Sensor() {
+@@ -207,9 +200,8 @@ bool Sensor::waitForNewFrame(nsecs_t reltime,
+             ALOGE("Error waiting for sensor readout signal: %d", res);
+             return false;
+         }
+-    } else {
+-        mReadoutComplete.signal();
+     }
++    mReadoutComplete.signal();
+ 
+     *captureTime = mCaptureTime;
+     mCapturedBuffers = NULL;
+@@ -279,7 +271,7 @@ bool Sensor::threadLoop() {
+     nsecs_t simulatedTime    = startRealTime;
+     nsecs_t frameEndRealTime = startRealTime + frameDuration;
+     nsecs_t frameReadoutEndRealTime = startRealTime +
+-            kRowReadoutTime * kResolution[1];
++            mRowReadoutTime * mResolution[1];
+ 
+     if (mNextCapturedBuffers != NULL) {
+         ALOGVV("Sensor starting readout");
+@@ -287,7 +279,7 @@ bool Sensor::threadLoop() {
+         capturedBuffers = mNextCapturedBuffers;
+         captureTime    = mNextCaptureTime;
+     }
+-    simulatedTime += kRowReadoutTime + kMinVerticalBlank;
++    simulatedTime += mRowReadoutTime + kMinVerticalBlank;
+ 
+     // TODO: Move this signal to another thread to simulate readout
+     // time properly
+@@ -357,7 +349,7 @@ bool Sensor::threadLoop() {
+                         captureDepthCloud(b.img);
+                     }
+                     break;
+-                case HAL_PIXEL_FORMAT_YCrCb_420_SP:
++                case HAL_PIXEL_FORMAT_YCbCr_420_888:
+                     captureNV21(b.img, gain, b.stride);
+                     break;
+                 case HAL_PIXEL_FORMAT_YV12:
+@@ -403,10 +395,10 @@ void Sensor::captureRaw(uint8_t *img, uint32_t gain, uint32_t stride) {
+ 
+     int bayerSelect[4] = {Scene::R, Scene::Gr, Scene::Gb, Scene::B}; // RGGB
+     mScene.setReadoutPixel(0,0);
+-    for (unsigned int y = 0; y < kResolution[1]; y++ ) {
++    for (unsigned int y = 0; y < mResolution[1]; y++ ) {
+         int *bayerRow = bayerSelect + (y & 0x1) * 2;
+         uint16_t *px = (uint16_t*)img + y * stride;
+-        for (unsigned int x = 0; x < kResolution[0]; x++) {
++        for (unsigned int x = 0; x < mResolution[0]; x++) {
+             uint32_t electronCount;
+             electronCount = mScene.getPixelElectrons()[bayerRow[x & 0x1]];
+ 
+@@ -431,7 +423,7 @@ void Sensor::captureRaw(uint8_t *img, uint32_t gain, uint32_t stride) {
+             *px++ = rawCount;
+         }
+         // TODO: Handle this better
+-        //simulatedTime += kRowReadoutTime;
++        //simulatedTime += mRowReadoutTime;
+     }
+     ALOGVV("Raw sensor image captured");
+ }
+@@ -440,12 +432,12 @@ void Sensor::captureRGBA(uint8_t *img, uint32_t gain, uint32_t stride) {
+     float totalGain = gain/100.0 * kBaseGainFactor;
+     // In fixed-point math, calculate total scaling from electrons to 8bpp
+     int scale64x = 64 * totalGain * 255 / kMaxRawValue;
+-    uint32_t inc = kResolution[0] / stride;
++    uint32_t inc = ceil( (float) mResolution[0] / stride);
+ 
+-    for (unsigned int y = 0, outY = 0; y < kResolution[1]; y+=inc, outY++ ) {
++    for (unsigned int y = 0, outY = 0; y < mResolution[1]; y+=inc, outY++ ) {
+         uint8_t *px = img + outY * stride * 4;
+         mScene.setReadoutPixel(0, y);
+-        for (unsigned int x = 0; x < kResolution[0]; x+=inc) {
++        for (unsigned int x = 0; x < mResolution[0]; x+=inc) {
+             uint32_t rCount, gCount, bCount;
+             // TODO: Perfect demosaicing is a cheat
+             const uint32_t *pixel = mScene.getPixelElectrons();
+@@ -461,7 +453,7 @@ void Sensor::captureRGBA(uint8_t *img, uint32_t gain, uint32_t stride) {
+                 mScene.getPixelElectrons();
+         }
+         // TODO: Handle this better
+-        //simulatedTime += kRowReadoutTime;
++        //simulatedTime += mRowReadoutTime;
+     }
+     ALOGVV("RGBA sensor image captured");
+ }
+@@ -470,12 +462,12 @@ void Sensor::captureRGB(uint8_t *img, uint32_t gain, uint32_t stride) {
+     float totalGain = gain/100.0 * kBaseGainFactor;
+     // In fixed-point math, calculate total scaling from electrons to 8bpp
+     int scale64x = 64 * totalGain * 255 / kMaxRawValue;
+-    uint32_t inc = kResolution[0] / stride;
++    uint32_t inc = ceil( (float) mResolution[0] / stride);
+ 
+-    for (unsigned int y = 0, outY = 0; y < kResolution[1]; y += inc, outY++ ) {
++    for (unsigned int y = 0, outY = 0; y < mResolution[1]; y += inc, outY++ ) {
+         mScene.setReadoutPixel(0, y);
+         uint8_t *px = img + outY * stride * 3;
+-        for (unsigned int x = 0; x < kResolution[0]; x += inc) {
++        for (unsigned int x = 0; x < mResolution[0]; x += inc) {
+             uint32_t rCount, gCount, bCount;
+             // TODO: Perfect demosaicing is a cheat
+             const uint32_t *pixel = mScene.getPixelElectrons();
+@@ -490,7 +482,7 @@ void Sensor::captureRGB(uint8_t *img, uint32_t gain, uint32_t stride) {
+                 mScene.getPixelElectrons();
+         }
+         // TODO: Handle this better
+-        //simulatedTime += kRowReadoutTime;
++        //simulatedTime += mRowReadoutTime;
+     }
+     ALOGVV("RGB sensor image captured");
+ }
+@@ -512,10 +504,13 @@ void Sensor::captureNV21(uint8_t *img, uint32_t gain, uint32_t stride) {
+     const int scaleOut = 64;
+     const int scaleOutSq = scaleOut * scaleOut; // after multiplies
+ 
+-    uint32_t inc = kResolution[0] / stride;
+-    uint32_t outH = kResolution[1] / inc;
++    // inc = how many pixels to skip while reading every next pixel
++    // horizontally.
++    uint32_t inc = ceil( (float) mResolution[0] / stride);
++    // outH = projected vertical resolution based on stride.
++    uint32_t outH = mResolution[1] / inc;
+     for (unsigned int y = 0, outY = 0;
+-         y < kResolution[1]; y+=inc, outY++) {
++         y < mResolution[1]; y+=inc, outY++) {
+         uint8_t *pxY = img + outY * stride;
+         uint8_t *pxVU = img + (outH + outY / 2) * stride;
+         mScene.setReadoutPixel(0,y);
+@@ -554,12 +549,12 @@ void Sensor::captureDepth(uint8_t *img, uint32_t gain, uint32_t stride) {
+     float totalGain = gain/100.0 * kBaseGainFactor;
+     // In fixed-point math, calculate scaling factor to 13bpp millimeters
+     int scale64x = 64 * totalGain * 8191 / kMaxRawValue;
+-    uint32_t inc = kResolution[0] / stride;
++    uint32_t inc = ceil( (float) mResolution[0] / stride);
+ 
+-    for (unsigned int y = 0, outY = 0; y < kResolution[1]; y += inc, outY++ ) {
++    for (unsigned int y = 0, outY = 0; y < mResolution[1]; y += inc, outY++ ) {
+         mScene.setReadoutPixel(0, y);
+         uint16_t *px = ((uint16_t*)img) + outY * stride;
+-        for (unsigned int x = 0; x < kResolution[0]; x += inc) {
++        for (unsigned int x = 0; x < mResolution[0]; x += inc) {
+             uint32_t depthCount;
+             // TODO: Make up real depth scene instead of using green channel
+             // as depth
+@@ -571,7 +566,7 @@ void Sensor::captureDepth(uint8_t *img, uint32_t gain, uint32_t stride) {
+                 mScene.getPixelElectrons();
+         }
+         // TODO: Handle this better
+-        //simulatedTime += kRowReadoutTime;
++        //simulatedTime += mRowReadoutTime;
+     }
+     ALOGVV("Depth sensor image captured");
+ }
+diff --git a/camera/fake-pipeline2/Sensor.h b/camera/fake-pipeline2/Sensor.h
+index 720fbc2..cdf1e97 100644
+--- a/camera/fake-pipeline2/Sensor.h
++++ b/camera/fake-pipeline2/Sensor.h
+@@ -89,7 +89,9 @@ class EmulatedFakeCamera2;
+ class Sensor: private Thread, public virtual RefBase {
+   public:
+ 
+-    Sensor();
++    // width: Width of pixel array
++    // height: Height of pixel array
++    Sensor(uint32_t width, uint32_t height);
+     ~Sensor();
+ 
+     /*
+@@ -157,8 +159,8 @@ class Sensor: private Thread, public virtual RefBase {
+     /**
+      * Static sensor characteristics
+      */
+-    static const unsigned int kResolution[2];
+-    static const unsigned int kActiveArray[4];
++    const uint32_t mResolution[2];
++    const uint32_t mActiveArray[4];
+ 
+     static const nsecs_t kExposureTimeRange[2];
+     static const nsecs_t kFrameDurationRange[2];
+@@ -187,7 +189,7 @@ class Sensor: private Thread, public virtual RefBase {
+     // expose) sequence can be overlapped by other row readouts, so the final
+     // minimum frame duration is purely a function of row readout time, at least
+     // if there's a reasonable number of rows.
+-    static const nsecs_t kRowReadoutTime;
++    const nsecs_t mRowReadoutTime;
+ 
+     static const int32_t kSensitivityRange[2];
+     static const uint32_t kDefaultSensitivity;
+diff --git a/camera/jpeg-stub/Android.mk b/camera/jpeg-stub/Android.mk
+index eea0ced..e017ac1 100644
+--- a/camera/jpeg-stub/Android.mk
++++ b/camera/jpeg-stub/Android.mk
+@@ -22,6 +22,7 @@ include $(CLEAR_VARS)
+ ifneq ($(TARGET_BUILD_PDK),true)
+ 
+ include $(CLEAR_VARS)
++LOCAL_VENDOR_MODULE := true
+ 
+ jpeg_module_relative_path := hw
+ jpeg_cflags := -fno-short-enums -DQEMU_HARDWARE
+@@ -59,6 +60,7 @@ include $(BUILD_SHARED_LIBRARY)
+ 
+ include ${CLEAR_VARS}
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE := camera.ranchu.jpeg
+ 
+ LOCAL_MODULE_RELATIVE_PATH := ${jpeg_module_relative_path}
+diff --git a/camera/media_codecs_performance.xml b/camera/media_codecs_performance.xml
+index 3d12ceb..b82e4c8 100644
+--- a/camera/media_codecs_performance.xml
++++ b/camera/media_codecs_performance.xml
+@@ -100,10 +100,10 @@
+             <Limit name="measured-frame-rate-320x180" range="968-1101" />
+             <!-- 3 runs, min 291 max 338 gmean 319 -->
+             <Limit name="measured-frame-rate-640x360" range="291-338" />
+-            <!-- 3 runs, min 109 max 128 gmean 118 -->
+-            <Limit name="measured-frame-rate-1280x720" range="109-128" />
+-            <!-- 5 runs, min 69 max 76 gmean 73 -->
+-            <Limit name="measured-frame-rate-1920x1080" range="69-76" />
++            <!-- Those values are from buildbots -->
++            <Limit name="measured-frame-rate-1280x720" range="280-400" />
++            <!-- Buildbot gets ~180 if it is in the first run, ~230 if it is the second run -->
++            <Limit name="measured-frame-rate-1920x1080" range="178-240" />
+         </MediaCodec>
+     </Decoders>
+ </MediaCodecs>
+diff --git a/compatibility_matrix.xml b/compatibility_matrix.xml
+new file mode 100644
+index 0000000..3082485
+--- /dev/null
++++ b/compatibility_matrix.xml
+@@ -0,0 +1,59 @@
++<compatibility-matrix version="1.0" type="device">
++    <hal format="hidl" optional="false">
++        <name>android.frameworks.schedulerservice</name>
++        <version>1.0</version>
++        <interface>
++            <name>ISchedulingPolicyService</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl" optional="false">
++        <name>android.frameworks.sensorservice</name>
++        <version>1.0</version>
++        <interface>
++            <name>ISensorManager</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl" optional="false">
++        <name>android.hidl.allocator</name>
++        <version>1.0</version>
++        <interface>
++            <name>IAllocator</name>
++            <instance>ashmem</instance>
++        </interface>
++    </hal>
++    <hal format="hidl" optional="false">
++        <name>android.hidl.manager</name>
++        <version>1.0</version>
++        <interface>
++            <name>IServiceManager</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl" optional="false">
++        <name>android.hidl.memory</name>
++        <version>1.0</version>
++        <interface>
++            <name>IMapper</name>
++            <instance>ashmem</instance>
++        </interface>
++    </hal>
++    <hal format="hidl" optional="false">
++        <name>android.hidl.token</name>
++        <version>1.0</version>
++        <interface>
++            <name>ITokenManager</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl" optional="false">
++        <name>android.system.wifi.keystore</name>
++        <version>1.0</version>
++        <interface>
++            <name>IKeystore</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++
++</compatibility-matrix>
+diff --git a/data/etc/config.ini b/data/etc/config.ini
+new file mode 100644
+index 0000000..c78b6b8
+--- /dev/null
++++ b/data/etc/config.ini
+@@ -0,0 +1,20 @@
++avd.ini.encoding=UTF-8
++disk.dataPartition.size=2G
++hw.accelerometer=yes
++hw.audioInput=yes
++hw.battery=yes
++hw.camera.back=emulated
++hw.camera.front=none
++hw.dPad=no
++hw.gps=yes
++hw.gpu.enabled=yes
++hw.keyboard=yes
++hw.lcd.density=240
++hw.mainKeys=no
++hw.ramSize=2048
++hw.sensors.orientation=yes
++hw.sensors.proximity=yes
++image.sysdir.1=x86/
++skin.dynamic=no
++skin.name=480x800
++skin.path=480x800
+diff --git a/data/etc/handheld_core_hardware.xml b/data/etc/handheld_core_hardware.xml
+index b2aaf13..728e5ba 100644
+--- a/data/etc/handheld_core_hardware.xml
++++ b/data/etc/handheld_core_hardware.xml
+@@ -32,6 +32,7 @@
+              android.hardware.sensor.light
+              android.hardware.sensor.proximity
+              android.hardware.sensor.relative_humidity
++             android.hardware.sensor.gyroscope
+              android.hardware.telephony
+              android.hardware.telephony.gsm
+              android.software.midi
+@@ -49,6 +50,7 @@
+     <feature name="android.hardware.sensor.light" />
+     <feature name="android.hardware.sensor.proximity" />
+     <feature name="android.hardware.sensor.relative_humidity" />
++    <feature name="android.hardware.sensor.gyroscope" />
+     <feature name="android.hardware.telephony" />
+     <feature name="android.hardware.telephony.gsm" />
+     <feature name="android.hardware.touchscreen" />
+diff --git a/fingerprint/Android.mk b/fingerprint/Android.mk
+index be21c97..55e513c 100644
+--- a/fingerprint/Android.mk
++++ b/fingerprint/Android.mk
+@@ -16,6 +16,7 @@ LOCAL_PATH := $(call my-dir)
+ 
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE := fingerprint.goldfish
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_C_INCLUDES += $(LOCAL_PATH)/../include
+@@ -26,6 +27,7 @@ include $(BUILD_SHARED_LIBRARY)
+ 
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE := fingerprint.ranchu
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_C_INCLUDES += $(LOCAL_PATH)/../include
+diff --git a/fingerprint/fingerprint.c b/fingerprint/fingerprint.c
+index 6041005..dd37770 100644
+--- a/fingerprint/fingerprint.c
++++ b/fingerprint/fingerprint.c
+@@ -308,11 +308,15 @@ static int fingerprint_enroll(struct fingerprint_device *device,
+         const hw_auth_token_t *hat,
+         uint32_t __unused gid,
+         uint32_t __unused timeout_sec) {
++    fingerprint_msg_t msg = {0, {0}};
++    msg.type = FINGERPRINT_ERROR;
++    msg.data.error = FINGERPRINT_ERROR_UNABLE_TO_PROCESS;
+     ALOGD("fingerprint_enroll");
+     qemu_fingerprint_device_t* dev = (qemu_fingerprint_device_t*)device;
+     if (!hat) {
+         ALOGW("%s: null auth token", __func__);
+-        return -EPROTONOSUPPORT;
++        dev->device.notify(&msg);
++        return 0;
+     }
+     if (hat->challenge == dev->challenge) {
+         // The secure_user_id retrieved from the auth token should be stored
+@@ -324,10 +328,12 @@ static int fingerprint_enroll(struct fingerprint_device *device,
+     }
+ 
+     if (hat->version != HW_AUTH_TOKEN_VERSION) {
+-        return -EPROTONOSUPPORT;
++        dev->device.notify(&msg);
++        return 0;
+     }
+     if (hat->challenge != dev->challenge && !(hat->authenticator_type & HW_AUTH_FINGERPRINT)) {
+-        return -EPERM;
++        dev->device.notify(&msg);
++        return 0;
+     }
+ 
+     dev->user_id = hat->user_id;
+@@ -447,7 +453,7 @@ static int fingerprint_remove(struct fingerprint_device *device,
+         ALOGE("Can't remove fingerprint (gid=%d, fid=%d); "
+               "device not initialized properly",
+               gid, fid);
+-        return -1;
++        return -ENODEV;
+     }
+ 
+     qemu_fingerprint_device_t* qdev = (qemu_fingerprint_device_t*)device;
+@@ -472,6 +478,7 @@ static int fingerprint_remove(struct fingerprint_device *device,
+                     pthread_mutex_unlock(&qdev->lock);
+                     msg.type = FINGERPRINT_TEMPLATE_REMOVED;
+                     msg.data.removed.finger.fid = theFid;
++                    msg.data.removed.finger.gid = qdev->group_id;
+                     device->notify(&msg);
+ 
+                     // Because we released the mutex, the list
+@@ -486,6 +493,7 @@ static int fingerprint_remove(struct fingerprint_device *device,
+         pthread_mutex_unlock(&qdev->lock);
+         msg.type = FINGERPRINT_TEMPLATE_REMOVED;
+         msg.data.removed.finger.fid = 0;
++        msg.data.removed.finger.gid = qdev->group_id;
+         device->notify(&msg);
+     } else {
+         // Delete one fingerprint
+@@ -502,7 +510,15 @@ static int fingerprint_remove(struct fingerprint_device *device,
+             qdev->listener.state = STATE_IDLE;
+             pthread_mutex_unlock(&qdev->lock);
+             ALOGE("Fingerprint ID %d not found", fid);
+-            return FINGERPRINT_ERROR;
++            //msg.type = FINGERPRINT_ERROR;
++            //msg.data.error = FINGERPRINT_ERROR_UNABLE_TO_REMOVE;
++            //device->notify(&msg);
++            msg.type = FINGERPRINT_TEMPLATE_REMOVED;
++            msg.data.removed.finger.fid = 0;
++            msg.data.removed.finger.gid = qdev->group_id;
++            msg.data.removed.remaining_templates = 0;
++            device->notify(&msg);
++            return 0;
+         }
+ 
+         qdev->listener.secureid[idx] = 0;
+diff --git a/fstab.ranchu b/fstab.ranchu
+index 31958e9..d7b3ad4 100644
+--- a/fstab.ranchu
++++ b/fstab.ranchu
+@@ -2,7 +2,6 @@
+ #<src>                                                  <mnt_point>         <type>    <mnt_flags and options>                              <fs_mgr_flags>
+ # The filesystem that contains the filesystem checker binary (typically /system) cannot
+ # specify MF_CHECK, and must come before any filesystems that do specify MF_CHECK
+-/dev/block/vda                                          /system             ext4      ro                                                   wait
+ /dev/block/vdb                                          /cache              ext4      noatime,nosuid,nodev,nomblk_io_submit,errors=panic   wait
+ /dev/block/vdc                                          /data               ext4      noatime,nosuid,nodev,nomblk_io_submit,errors=panic   wait,check,quota
+-/devices/*/block/vdd                                    auto                auto      defaults                                             voldmanaged=sdcard:auto,encryptable=userdata
++/devices/*/block/vdf                                    auto                auto      defaults                                             voldmanaged=sdcard:auto,encryptable=userdata
+diff --git a/fstab.ranchu.arm b/fstab.ranchu.arm
+new file mode 100644
+index 0000000..6197823
+--- /dev/null
++++ b/fstab.ranchu.arm
+@@ -0,0 +1,7 @@
++# Android fstab file.
++#<src>                                                  <mnt_point>         <type>    <mnt_flags and options>                              <fs_mgr_flags>
++# The filesystem that contains the filesystem checker binary (typically /system) cannot
++# specify MF_CHECK, and must come before any filesystems that do specify MF_CHECK
++/dev/block/vdb                                          /cache              ext4      noatime,nosuid,nodev,nomblk_io_submit,errors=panic   wait
++/dev/block/vdc                                          /data               ext4      noatime,nosuid,nodev,nomblk_io_submit,errors=panic   wait,check,quota
++/devices/*/block/vde                                    auto                auto      defaults                                             voldmanaged=sdcard:auto,encryptable=userdata
+diff --git a/fstab.ranchu.early b/fstab.ranchu.early
+new file mode 100644
+index 0000000..915d923
+--- /dev/null
++++ b/fstab.ranchu.early
+@@ -0,0 +1,6 @@
++# Android fstab file.
++#<src>                                                  <mnt_point>         <type>    <mnt_flags and options>                              <fs_mgr_flags>
++# The filesystem that contains the filesystem checker binary (typically /system) cannot
++# specify MF_CHECK, and must come before any filesystems that do specify MF_CHECK
++/dev/block/vda                                          /system             ext4      ro                                                   wait
++/dev/block/vde                                          /vendor             ext4      ro                                                   wait
+diff --git a/fstab.ranchu.early.arm b/fstab.ranchu.early.arm
+new file mode 100644
+index 0000000..5854b59
+--- /dev/null
++++ b/fstab.ranchu.early.arm
+@@ -0,0 +1,6 @@
++# Android fstab file.
++#<src>                                                  <mnt_point>         <type>    <mnt_flags and options>                              <fs_mgr_flags>
++# The filesystem that contains the filesystem checker binary (typically /system) cannot
++# specify MF_CHECK, and must come before any filesystems that do specify MF_CHECK
++/dev/block/vda                                          /system             ext4      ro                                                   wait
++/dev/block/vdd                                          /vendor             ext4      ro                                                   wait
+diff --git a/gatekeeper/Android.mk b/gatekeeper/Android.mk
+new file mode 100644
+index 0000000..dc995e4
+--- /dev/null
++++ b/gatekeeper/Android.mk
+@@ -0,0 +1,46 @@
++#
++# Copyright (C) 2015 The Android Open Source Project
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++
++LOCAL_PATH := $(call my-dir)
++
++include $(CLEAR_VARS)
++LOCAL_VENDOR_MODULE := true
++LOCAL_MODULE := gatekeeper.ranchu
++LOCAL_MODULE_RELATIVE_PATH := hw
++
++LOCAL_CFLAGS := -Wall -Wextra -Werror -Wunused
++LOCAL_SRC_FILES := \
++	module.cpp \
++	SoftGateKeeperDevice.cpp
++
++
++LOCAL_SHARED_LIBRARIES := \
++	libbinder \
++	libgatekeeper \
++	liblog \
++	libhardware \
++	libbase \
++	libutils \
++	libcrypto \
++	libkeystore_binder \
++	libhidlbase \
++	libhidltransport \
++	libhwbinder \
++	android.hardware.gatekeeper@1.0 \
++
++LOCAL_STATIC_LIBRARIES := libscrypt_static
++LOCAL_C_INCLUDES := external/scrypt/lib/crypto
++include $(BUILD_SHARED_LIBRARY)
+diff --git a/gatekeeper/SoftGateKeeper.h b/gatekeeper/SoftGateKeeper.h
+new file mode 100644
+index 0000000..2f4f4d7
+--- /dev/null
++++ b/gatekeeper/SoftGateKeeper.h
+@@ -0,0 +1,182 @@
++/*
++ * Copyright 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ *
++ */
++
++#ifndef SOFT_GATEKEEPER_H_
++#define SOFT_GATEKEEPER_H_
++
++extern "C" {
++#include <openssl/rand.h>
++#include <openssl/sha.h>
++
++#include <crypto_scrypt.h>
++}
++
++#include <android-base/memory.h>
++#include <gatekeeper/gatekeeper.h>
++
++#include <iostream>
++#include <unordered_map>
++#include <memory>
++
++namespace gatekeeper {
++
++struct fast_hash_t {
++    uint64_t salt;
++    uint8_t digest[SHA256_DIGEST_LENGTH];
++};
++
++class SoftGateKeeper : public GateKeeper {
++public:
++    static const uint32_t SIGNATURE_LENGTH_BYTES = 32;
++
++    // scrypt params
++    static const uint64_t N = 16384;
++    static const uint32_t r = 8;
++    static const uint32_t p = 1;
++
++    static const int MAX_UINT_32_CHARS = 11;
++
++    SoftGateKeeper() {
++        key_.reset(new uint8_t[SIGNATURE_LENGTH_BYTES]);
++        memset(key_.get(), 0, SIGNATURE_LENGTH_BYTES);
++    }
++
++    virtual ~SoftGateKeeper() {
++    }
++
++    virtual bool GetAuthTokenKey(const uint8_t **auth_token_key,
++            uint32_t *length) const {
++        if (auth_token_key == NULL || length == NULL) return false;
++        uint8_t *auth_token_key_copy = new uint8_t[SIGNATURE_LENGTH_BYTES];
++        memcpy(auth_token_key_copy, key_.get(), SIGNATURE_LENGTH_BYTES);
++
++        *auth_token_key = auth_token_key_copy;
++        *length = SIGNATURE_LENGTH_BYTES;
++        return true;
++    }
++
++    virtual void GetPasswordKey(const uint8_t **password_key, uint32_t *length) {
++        if (password_key == NULL || length == NULL) return;
++        uint8_t *password_key_copy = new uint8_t[SIGNATURE_LENGTH_BYTES];
++        memcpy(password_key_copy, key_.get(), SIGNATURE_LENGTH_BYTES);
++
++        *password_key = password_key_copy;
++        *length = SIGNATURE_LENGTH_BYTES;
++    }
++
++    virtual void ComputePasswordSignature(uint8_t *signature, uint32_t signature_length,
++            const uint8_t *, uint32_t, const uint8_t *password,
++            uint32_t password_length, salt_t salt) const {
++        if (signature == NULL) return;
++        crypto_scrypt(password, password_length, reinterpret_cast<uint8_t *>(&salt),
++                sizeof(salt), N, r, p, signature, signature_length);
++    }
++
++    virtual void GetRandom(void *random, uint32_t requested_length) const {
++        if (random == NULL) return;
++        RAND_pseudo_bytes((uint8_t *) random, requested_length);
++    }
++
++    virtual void ComputeSignature(uint8_t *signature, uint32_t signature_length,
++            const uint8_t *, uint32_t, const uint8_t *, const uint32_t) const {
++        if (signature == NULL) return;
++        memset(signature, 0, signature_length);
++    }
++
++    virtual uint64_t GetMillisecondsSinceBoot() const {
++        struct timespec time;
++        int res = clock_gettime(CLOCK_BOOTTIME, &time);
++        if (res < 0) return 0;
++        return (time.tv_sec * 1000) + (time.tv_nsec / 1000 / 1000);
++    }
++
++    virtual bool IsHardwareBacked() const {
++        return false;
++    }
++
++    virtual bool GetFailureRecord(uint32_t uid, secure_id_t user_id, failure_record_t *record,
++            bool /* secure */) {
++        failure_record_t *stored = &failure_map_[uid];
++        if (user_id != stored->secure_user_id) {
++            stored->secure_user_id = user_id;
++            stored->last_checked_timestamp = 0;
++            stored->failure_counter = 0;
++        }
++        memcpy(record, stored, sizeof(*record));
++        return true;
++    }
++
++    virtual bool ClearFailureRecord(uint32_t uid, secure_id_t user_id, bool /* secure */) {
++        failure_record_t *stored = &failure_map_[uid];
++        stored->secure_user_id = user_id;
++        stored->last_checked_timestamp = 0;
++        stored->failure_counter = 0;
++        return true;
++    }
++
++    virtual bool WriteFailureRecord(uint32_t uid, failure_record_t *record, bool /* secure */) {
++        failure_map_[uid] = *record;
++        return true;
++    }
++
++    fast_hash_t ComputeFastHash(const SizedBuffer &password, uint64_t salt) {
++        fast_hash_t fast_hash;
++        size_t digest_size = password.length + sizeof(salt);
++        std::unique_ptr<uint8_t[]> digest(new uint8_t[digest_size]);
++        memcpy(digest.get(), &salt, sizeof(salt));
++        memcpy(digest.get() + sizeof(salt), password.buffer.get(), password.length);
++
++        SHA256(digest.get(), digest_size, (uint8_t *) &fast_hash.digest);
++
++        fast_hash.salt = salt;
++        return fast_hash;
++    }
++
++    bool VerifyFast(const fast_hash_t &fast_hash, const SizedBuffer &password) {
++        fast_hash_t computed = ComputeFastHash(password, fast_hash.salt);
++        return memcmp(computed.digest, fast_hash.digest, SHA256_DIGEST_LENGTH) == 0;
++    }
++
++    bool DoVerify(const password_handle_t *expected_handle, const SizedBuffer &password) {
++        uint64_t user_id = android::base::get_unaligned<secure_id_t>(&expected_handle->user_id);
++        FastHashMap::const_iterator it = fast_hash_map_.find(user_id);
++        if (it != fast_hash_map_.end() && VerifyFast(it->second, password)) {
++            return true;
++        } else {
++            if (GateKeeper::DoVerify(expected_handle, password)) {
++                uint64_t salt;
++                GetRandom(&salt, sizeof(salt));
++                fast_hash_map_[user_id] = ComputeFastHash(password, salt);
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++private:
++
++    typedef std::unordered_map<uint32_t, failure_record_t> FailureRecordMap;
++    typedef std::unordered_map<uint64_t, fast_hash_t> FastHashMap;
++
++    std::unique_ptr<uint8_t[]> key_;
++    FailureRecordMap failure_map_;
++    FastHashMap fast_hash_map_;
++};
++}
++
++#endif // SOFT_GATEKEEPER_H_
+diff --git a/gatekeeper/SoftGateKeeperDevice.cpp b/gatekeeper/SoftGateKeeperDevice.cpp
+new file mode 100644
+index 0000000..3dc6997
+--- /dev/null
++++ b/gatekeeper/SoftGateKeeperDevice.cpp
+@@ -0,0 +1,116 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#include "SoftGateKeeper.h"
++#include "SoftGateKeeperDevice.h"
++
++namespace goldfish {
++
++int SoftGateKeeperDevice::enroll(uint32_t uid,
++            const uint8_t *current_password_handle, uint32_t current_password_handle_length,
++            const uint8_t *current_password, uint32_t current_password_length,
++            const uint8_t *desired_password, uint32_t desired_password_length,
++            uint8_t **enrolled_password_handle, uint32_t *enrolled_password_handle_length) {
++
++    if (enrolled_password_handle == NULL || enrolled_password_handle_length == NULL ||
++            desired_password == NULL || desired_password_length == 0)
++        return -EINVAL;
++
++    // Current password and current password handle go together
++    if (current_password_handle == NULL || current_password_handle_length == 0 ||
++            current_password == NULL || current_password_length == 0) {
++        current_password_handle = NULL;
++        current_password_handle_length = 0;
++        current_password = NULL;
++        current_password_length = 0;
++    }
++
++    SizedBuffer desired_password_buffer(desired_password_length);
++    memcpy(desired_password_buffer.buffer.get(), desired_password, desired_password_length);
++
++    SizedBuffer current_password_handle_buffer(current_password_handle_length);
++    if (current_password_handle) {
++        memcpy(current_password_handle_buffer.buffer.get(), current_password_handle,
++                current_password_handle_length);
++    }
++
++    SizedBuffer current_password_buffer(current_password_length);
++    if (current_password) {
++        memcpy(current_password_buffer.buffer.get(), current_password, current_password_length);
++    }
++
++    EnrollRequest request(uid, &current_password_handle_buffer, &desired_password_buffer,
++            &current_password_buffer);
++    EnrollResponse response;
++
++    impl_->Enroll(request, &response);
++
++    if (response.error == ERROR_RETRY) {
++        return response.retry_timeout;
++    } else if (response.error != ERROR_NONE) {
++        return -EINVAL;
++    }
++
++    *enrolled_password_handle = response.enrolled_password_handle.buffer.release();
++    gatekeeper::password_handle_t *handle =
++                    reinterpret_cast<gatekeeper::password_handle_t *>(*enrolled_password_handle);
++    //FIXIT: We need to move this module to host with gatekeeper pipe
++    handle->hardware_backed = true;
++
++    *enrolled_password_handle_length = response.enrolled_password_handle.length;
++    return 0;
++}
++
++int SoftGateKeeperDevice::verify(uint32_t uid,
++        uint64_t challenge, const uint8_t *enrolled_password_handle,
++        uint32_t enrolled_password_handle_length, const uint8_t *provided_password,
++        uint32_t provided_password_length, uint8_t **auth_token, uint32_t *auth_token_length,
++        bool *request_reenroll) {
++
++    if (enrolled_password_handle == NULL ||
++            provided_password == NULL) {
++        return -EINVAL;
++    }
++
++    SizedBuffer password_handle_buffer(enrolled_password_handle_length);
++    memcpy(password_handle_buffer.buffer.get(), enrolled_password_handle,
++            enrolled_password_handle_length);
++    SizedBuffer provided_password_buffer(provided_password_length);
++    memcpy(provided_password_buffer.buffer.get(), provided_password, provided_password_length);
++
++    VerifyRequest request(uid, challenge, &password_handle_buffer, &provided_password_buffer);
++    VerifyResponse response;
++
++    impl_->Verify(request, &response);
++
++    if (response.error == ERROR_RETRY) {
++        return response.retry_timeout;
++    } else if (response.error != ERROR_NONE) {
++        return -EINVAL;
++    }
++
++    if (auth_token != NULL && auth_token_length != NULL) {
++       *auth_token = response.auth_token.buffer.release();
++       *auth_token_length = response.auth_token.length;
++    }
++
++    if (request_reenroll != NULL) {
++        *request_reenroll = response.request_reenroll;
++    }
++
++    return 0;
++}
++
++} // namespace goldfish
+diff --git a/gatekeeper/SoftGateKeeperDevice.h b/gatekeeper/SoftGateKeeperDevice.h
+new file mode 100644
+index 0000000..af3a1bc
+--- /dev/null
++++ b/gatekeeper/SoftGateKeeperDevice.h
+@@ -0,0 +1,76 @@
++/*
++ * Copyright 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef SOFT_GATEKEEPER_DEVICE_H_
++#define SOFT_GATEKEEPER_DEVICE_H_
++
++#include "SoftGateKeeper.h"
++
++#include <memory>
++
++using namespace gatekeeper;
++
++namespace goldfish {
++
++/**
++ * Software based GateKeeper implementation
++ */
++class SoftGateKeeperDevice {
++public:
++    SoftGateKeeperDevice() {
++        impl_.reset(new SoftGateKeeper());
++    }
++
++   // Wrappers to translate the gatekeeper HAL API to the Kegyuard Messages API.
++
++    /**
++     * Enrolls password_payload, which should be derived from a user selected pin or password,
++     * with the authentication factor private key used only for enrolling authentication
++     * factor data.
++     *
++     * Returns: 0 on success or an error code less than 0 on error.
++     * On error, enrolled_password_handle will not be allocated.
++     */
++    int enroll(uint32_t uid,
++            const uint8_t *current_password_handle, uint32_t current_password_handle_length,
++            const uint8_t *current_password, uint32_t current_password_length,
++            const uint8_t *desired_password, uint32_t desired_password_length,
++            uint8_t **enrolled_password_handle, uint32_t *enrolled_password_handle_length);
++
++    /**
++     * Verifies provided_password matches enrolled_password_handle.
++     *
++     * Implementations of this module may retain the result of this call
++     * to attest to the recency of authentication.
++     *
++     * On success, writes the address of a verification token to auth_token,
++     * usable to attest password verification to other trusted services. Clients
++     * may pass NULL for this value.
++     *
++     * Returns: 0 on success or an error code less than 0 on error
++     * On error, verification token will not be allocated
++     */
++    int verify(uint32_t uid, uint64_t challenge,
++            const uint8_t *enrolled_password_handle, uint32_t enrolled_password_handle_length,
++            const uint8_t *provided_password, uint32_t provided_password_length,
++            uint8_t **auth_token, uint32_t *auth_token_length, bool *request_reenroll);
++private:
++    std::unique_ptr<SoftGateKeeper> impl_;
++};
++
++} // namespace gatekeeper
++
++#endif //SOFT_GATEKEEPER_DEVICE_H_
+diff --git a/gatekeeper/module.cpp b/gatekeeper/module.cpp
+new file mode 100644
+index 0000000..787d3a5
+--- /dev/null
++++ b/gatekeeper/module.cpp
+@@ -0,0 +1,127 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <hardware/hardware.h>
++#include <hardware/gatekeeper.h>
++#define LOG_TAG "GoldfishGatekeeper"
++#include <cutils/log.h>
++
++#include <string.h>
++#include <errno.h>
++#include <stdlib.h>
++
++#include "SoftGateKeeper.h"
++#include "SoftGateKeeperDevice.h"
++
++using goldfish::SoftGateKeeperDevice;
++
++struct goldfish_gatekeeper_device {
++    gatekeeper_device device;
++    SoftGateKeeperDevice *s_gatekeeper;
++};
++
++static goldfish_gatekeeper_device s_device;
++
++static int enroll(const struct gatekeeper_device *dev __unused, uint32_t uid,
++            const uint8_t *current_password_handle, uint32_t current_password_handle_length,
++            const uint8_t *current_password, uint32_t current_password_length,
++            const uint8_t *desired_password, uint32_t desired_password_length,
++            uint8_t **enrolled_password_handle, uint32_t *enrolled_password_handle_length) {
++
++    SoftGateKeeperDevice *s_gatekeeper = ((goldfish_gatekeeper_device*)(dev))->s_gatekeeper;
++    ALOGE("called %s with gate keeper %p device %p\n", __func__, s_gatekeeper, dev);
++    if (s_gatekeeper == nullptr)  {
++        abort();
++        return -EINVAL;
++    }
++
++    return s_gatekeeper->enroll(uid,
++            current_password_handle, current_password_handle_length,
++            current_password, current_password_length,
++            desired_password, desired_password_length,
++            enrolled_password_handle, enrolled_password_handle_length);
++}
++
++static int verify(const struct gatekeeper_device *dev __unused, uint32_t uid, uint64_t challenge,
++            const uint8_t *enrolled_password_handle, uint32_t enrolled_password_handle_length,
++            const uint8_t *provided_password, uint32_t provided_password_length,
++            uint8_t **auth_token, uint32_t *auth_token_length, bool *request_reenroll) {
++    SoftGateKeeperDevice *s_gatekeeper = ((goldfish_gatekeeper_device*)(dev))->s_gatekeeper;
++    ALOGE("called %s with gate keeper %p device %p\n", __func__, s_gatekeeper, dev);
++    if (s_gatekeeper == nullptr) return -EINVAL;
++    return s_gatekeeper->verify(uid, challenge,
++            enrolled_password_handle, enrolled_password_handle_length,
++            provided_password, provided_password_length,
++            auth_token, auth_token_length, request_reenroll);
++}
++
++static int close_device(hw_device_t* dev __unused) {
++    SoftGateKeeperDevice *s_gatekeeper = ((goldfish_gatekeeper_device*)(dev))->s_gatekeeper;
++    if (s_gatekeeper == nullptr) return 0;
++    delete s_gatekeeper;
++    s_gatekeeper = nullptr;
++    ALOGE("called %s with gate keeper %p device %p\n", __func__, s_gatekeeper, dev);
++    return 0;
++}
++
++static int goldfish_gatekeeper_open(const hw_module_t *module, const char *name,
++        hw_device_t **device) {
++
++    if (strcmp(name, HARDWARE_GATEKEEPER) != 0) {
++        abort();
++        return -EINVAL;
++    }
++
++    memset(&s_device, 0, sizeof(s_device));
++
++    SoftGateKeeperDevice *s_gatekeeper = new SoftGateKeeperDevice();
++    if (s_gatekeeper == nullptr) return -ENOMEM;
++
++    s_device.s_gatekeeper = s_gatekeeper;
++
++    s_device.device.common.tag = HARDWARE_DEVICE_TAG;
++    s_device.device.common.version = 1;
++    s_device.device.common.module = const_cast<hw_module_t *>(module);
++    s_device.device.common.close = close_device;
++
++    s_device.device.enroll = enroll;
++    s_device.device.verify = verify;
++    s_device.device.delete_user = nullptr;
++    s_device.device.delete_all_users = nullptr;
++
++    *device = &s_device.device.common;
++    ALOGE("called %s with gate keeper %p device %p\n", __func__, s_gatekeeper, *device);
++
++    return 0;
++}
++
++static struct hw_module_methods_t gatekeeper_module_methods = {
++    .open = goldfish_gatekeeper_open,
++};
++
++struct gatekeeper_module HAL_MODULE_INFO_SYM __attribute__((visibility("default"))) = {
++    .common = {
++        .tag = HARDWARE_MODULE_TAG,
++        .module_api_version = GATEKEEPER_MODULE_API_VERSION_0_1,
++        .hal_api_version = HARDWARE_HAL_API_VERSION,
++        .id = GATEKEEPER_HARDWARE_MODULE_ID,
++        .name = "Goldfish GateKeeper HAL",
++        .author = "The Android Open Source Project",
++        .methods = &gatekeeper_module_methods,
++        .dso = 0,
++        .reserved = {}
++    },
++};
+diff --git a/gps/Android.mk b/gps/Android.mk
+index c143981..d1b593a 100644
+--- a/gps/Android.mk
++++ b/gps/Android.mk
+@@ -24,6 +24,7 @@ LOCAL_PATH := $(call my-dir)
+ # hw/<GPS_HARDWARE_MODULE_ID>.<ro.hardware>.so
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_CFLAGS += -DQEMU_HARDWARE
+ LOCAL_SHARED_LIBRARIES := liblog libcutils libhardware
+@@ -39,6 +40,7 @@ include $(BUILD_SHARED_LIBRARY)
+ 
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_CFLAGS += -DQEMU_HARDWARE
+ LOCAL_SHARED_LIBRARIES := liblog libcutils libhardware
+diff --git a/gps/gps_qemu.c b/gps/gps_qemu.c
+index e623418..dc7351f 100644
+--- a/gps/gps_qemu.c
++++ b/gps/gps_qemu.c
+@@ -240,7 +240,6 @@ nmea_reader_set_callback( NmeaReader*  r, gps_location_callback  cb )
+     if (cb != NULL && r->fix.flags != 0) {
+         D("%s: sending latest fix to new callback", __FUNCTION__);
+         r->callback( &r->fix );
+-        r->fix.flags = 0;
+     }
+ }
+ 
+@@ -466,6 +465,7 @@ nmea_reader_parse( NmeaReader*  r )
+         Token  tok_altitude      = nmea_tokenizer_get(tzer,9);
+         Token  tok_altitudeUnits = nmea_tokenizer_get(tzer,10);
+ 
++        r->fix.flags = 0;
+         nmea_reader_update_time(r, tok_time);
+         nmea_reader_update_latlong(r, tok_latitude,
+                                       tok_latitudeHemi.p[0],
+@@ -489,6 +489,7 @@ nmea_reader_parse( NmeaReader*  r )
+         D("in RMC, fixStatus=%c", tok_fixStatus.p[0]);
+         if (tok_fixStatus.p[0] == 'A')
+         {
++            r->fix.flags = 0;
+             nmea_reader_update_date( r, tok_date, tok_time );
+ 
+             nmea_reader_update_latlong( r, tok_latitude,
+@@ -536,7 +537,6 @@ nmea_reader_parse( NmeaReader*  r )
+ #endif
+         if (r->callback) {
+             r->callback( &r->fix );
+-            r->fix.flags = 0;
+         }
+         else {
+             D("no callback, keeping data until needed !");
+@@ -688,6 +688,17 @@ gps_state_thread( void*  arg )
+     int         started    = 0;
+     int         gps_fd     = state->fd;
+     int         control_fd = state->control[1];
++    GpsStatus gps_status;
++    gps_status.size = sizeof(gps_status);
++    GpsSvStatus  gps_sv_status;
++    memset(&gps_sv_status, 0, sizeof(gps_sv_status));
++    gps_sv_status.size = sizeof(gps_sv_status);
++    gps_sv_status.num_svs = 1;
++    gps_sv_status.sv_list[0].size = sizeof(gps_sv_status.sv_list[0]);
++    gps_sv_status.sv_list[0].prn = 17;
++    gps_sv_status.sv_list[0].snr = 60.0;
++    gps_sv_status.sv_list[0].elevation = 30.0;
++    gps_sv_status.sv_list[0].azimuth = 30.0;
+ 
+     nmea_reader_init( reader );
+ 
+@@ -702,7 +713,15 @@ gps_state_thread( void*  arg )
+         struct epoll_event   events[2];
+         int                  ne, nevents;
+ 
+-        nevents = epoll_wait( epoll_fd, events, 2, -1 );
++        int timeout = -1;
++        if (gps_status.status == GPS_STATUS_SESSION_BEGIN) {
++            timeout = 10 * 1000; // 10 seconds
++        }
++        nevents = epoll_wait( epoll_fd, events, 2, timeout );
++        if (state->callbacks.sv_status_cb) {
++            state->callbacks.sv_status_cb(&gps_sv_status);
++        }
++        // update satilite info
+         if (nevents < 0) {
+             if (errno != EINTR)
+                 ALOGE("epoll_wait() unexpected error: %s", strerror(errno));
+@@ -735,6 +754,10 @@ gps_state_thread( void*  arg )
+                             D("gps thread starting  location_cb=%p", state->callbacks.location_cb);
+                             started = 1;
+                             nmea_reader_set_callback( reader, state->callbacks.location_cb );
++                            gps_status.status = GPS_STATUS_SESSION_BEGIN;
++                            if (state->callbacks.status_cb) {
++                                state->callbacks.status_cb(&gps_status);
++                            }
+                         }
+                     }
+                     else if (cmd == CMD_STOP) {
+@@ -742,6 +765,10 @@ gps_state_thread( void*  arg )
+                             D("gps thread stopping");
+                             started = 0;
+                             nmea_reader_set_callback( reader, NULL );
++                            gps_status.status = GPS_STATUS_SESSION_END;
++                            if (state->callbacks.status_cb) {
++                                state->callbacks.status_cb(&gps_status);
++                            }
+                         }
+                     }
+                 }
+@@ -807,6 +834,16 @@ gps_state_init( GpsState*  state, GpsCallbacks* callbacks )
+ 
+     state->callbacks = *callbacks;
+ 
++    // Explicitly initialize capabilities
++    state->callbacks.set_capabilities_cb(0);
++
++
++    // Setup system info, we are pre 2016 hardware.
++    GnssSystemInfo sysinfo;
++    sysinfo.size = sizeof(GnssSystemInfo);
++    sysinfo.year_of_hw = 2015;
++    state->callbacks.set_system_info_cb(&sysinfo);
++
+     D("gps state initialized");
+     return;
+ 
+diff --git a/hwcomposer/Android.mk b/hwcomposer/Android.mk
+index 5f20c58..55c66bb 100644
+--- a/hwcomposer/Android.mk
++++ b/hwcomposer/Android.mk
+@@ -17,6 +17,7 @@
+ LOCAL_PATH:= $(call my-dir)
+ 
+ include $(CLEAR_VARS)
++LOCAL_VENDOR_MODULE := true
+ emulator_hwcomposer_shared_libraries := \
+     liblog \
+     libutils \
+@@ -54,6 +55,7 @@ include $(BUILD_SHARED_LIBRARY)
+ # RANCHU BUILD
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_SHARED_LIBRARIES := $(emulator_hwcomposer_shared_libraries)
+ LOCAL_SRC_FILES := $(emulator_hwcomposer_src_files)
+ LOCAL_CFLAGS := $(emulator_hwcomposer_cflags)
+diff --git a/include/qemu_pipe.h b/include/qemu_pipe.h
+index d76ba3b..1056bb3 100644
+--- a/include/qemu_pipe.h
++++ b/include/qemu_pipe.h
+@@ -81,7 +81,7 @@ qemu_pipe_open(const char*  pipeName)
+ {
+     char  buff[256];
+     int   buffLen;
+-    int   fd, ret;
++    int   fd;
+ 
+     if (pipeName == NULL || pipeName[0] == '\0') {
+         errno = EINVAL;
+diff --git a/include/qemud.h b/include/qemud.h
+index 71ec3bf..c6327ee 100644
+--- a/include/qemud.h
++++ b/include/qemud.h
+@@ -36,7 +36,10 @@
+  * that sends its formatted string argument(s) to the log.
+  * If not, ignore the traces.
+  */
+-#  define  D(...) ((void)0)
++#ifndef D
++#  define  D(...)   do{}while(0)
++#endif
++
+ 
+ static __inline__ int
+ qemud_channel_open(const char*  name)
+@@ -108,7 +111,7 @@ static __inline__ int
+ qemud_channel_recv(int  fd, void*  msg, int  msgsize)
+ {
+     char  header[5];
+-    int   size, avail;
++    int   size;
+ 
+     if (!ReadFully(fd, header, 4)) {
+         D("can't read qemud frame header: %s", strerror(errno));
+diff --git a/init.goldfish.rc b/init.goldfish.rc
+index b1613a4..db958d7 100644
+--- a/init.goldfish.rc
++++ b/init.goldfish.rc
+@@ -112,7 +112,7 @@ service fingerprintd /system/bin/fingerprintd
+     user system
+ 
+ service bugreport /system/bin/dumpstate -d -p -B \
+-        -o /data/data/com.android.shell/files/bugreports/bugreport
++        -o /data/user_de/0/com.android.shell/files/bugreports/bugreport
+     class main
+     disabled
+     oneshot
+diff --git a/init.ranchu-net.sh b/init.ranchu-net.sh
+index e4347d3..a14ab18 100755
+--- a/init.ranchu-net.sh
++++ b/init.ranchu-net.sh
+@@ -1,4 +1,4 @@
+-#!/system/bin/sh
++#!/vendor/bin/sh
+ 
+ # Setup networking when boot starts
+ ifconfig eth0 10.0.2.15 netmask 255.255.255.0 up
+diff --git a/init.ranchu.rc b/init.ranchu.rc
+index 9291c23..bab822d 100644
+--- a/init.ranchu.rc
++++ b/init.ranchu.rc
+@@ -89,7 +89,7 @@ service ranchu-net /vendor/bin/init.ranchu-net.sh
+ # might read them (e.g. surface flinger), so define it in
+ # class 'core'
+ #
+-service qemu-props /system/bin/qemu-props
++service qemu-props /vendor/bin/qemu-props
+     class core
+     user root
+     group root
+@@ -115,7 +115,7 @@ service fingerprintd /system/bin/fingerprintd
+     user system
+ 
+ service bugreport /system/bin/dumpstate -d -p -B \
+-        -o /data/data/com.android.shell/files/bugreports/bugreport
++        -o /data/user_de/0/com.android.shell/files/bugreports/bugreport
+     class main
+     disabled
+     oneshot
+diff --git a/keymaster/Android.mk b/keymaster/Android.mk
+new file mode 100644
+index 0000000..e6c7b22
+--- /dev/null
++++ b/keymaster/Android.mk
+@@ -0,0 +1,20 @@
++# Emulated keymaster - ranchu build##########################################
++LOCAL_PATH := $(call my-dir)
++include $(CLEAR_VARS)
++ifeq ($(USE_32_BIT_KEYSTORE), true)
++LOCAL_MULTILIB := 32
++endif
++LOCAL_MODULE := keystore.ranchu
++LOCAL_VENDOR_MODULE := true
++LOCAL_MODULE_RELATIVE_PATH := hw
++LOCAL_SRC_FILES := keymaster_module.cpp \
++                   trusty_keymaster_ipc.cpp \
++                   trusty_keymaster_device.cpp
++
++LOCAL_C_INCLUDES := system/security/keystore \
++                    $(LOCAL_PATH)/../include
++LOCAL_CFLAGS = -fvisibility=hidden -Wall -Werror
++LOCAL_SHARED_LIBRARIES := libcrypto liblog libsoftkeymasterdevice libkeymaster_messages libcutils
++LOCAL_HEADER_LIBRARIES := libhardware_headers
++LOCAL_MODULE_TAGS := optional
++include $(BUILD_SHARED_LIBRARY)
+diff --git a/keymaster/keymaster_ipc.h b/keymaster/keymaster_ipc.h
+new file mode 100644
+index 0000000..b38eb05
+--- /dev/null
++++ b/keymaster/keymaster_ipc.h
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (C) 2012 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++// clang-format off
++
++#define KEYMASTER_PORT "com.android.trusty.keymaster"
++#define KEYMASTER_MAX_BUFFER_LENGTH 4096
++
++// Commands
++enum keymaster_command : uint32_t {
++    KEYMASTER_RESP_BIT              = 1,
++    KEYMASTER_REQ_SHIFT             = 1,
++
++    KM_GENERATE_KEY                 = (0 << KEYMASTER_REQ_SHIFT),
++    KM_BEGIN_OPERATION              = (1 << KEYMASTER_REQ_SHIFT),
++    KM_UPDATE_OPERATION             = (2 << KEYMASTER_REQ_SHIFT),
++    KM_FINISH_OPERATION             = (3 << KEYMASTER_REQ_SHIFT),
++    KM_ABORT_OPERATION              = (4 << KEYMASTER_REQ_SHIFT),
++    KM_IMPORT_KEY                   = (5 << KEYMASTER_REQ_SHIFT),
++    KM_EXPORT_KEY                   = (6 << KEYMASTER_REQ_SHIFT),
++    KM_GET_VERSION                  = (7 << KEYMASTER_REQ_SHIFT),
++    KM_ADD_RNG_ENTROPY              = (8 << KEYMASTER_REQ_SHIFT),
++    KM_GET_SUPPORTED_ALGORITHMS     = (9 << KEYMASTER_REQ_SHIFT),
++    KM_GET_SUPPORTED_BLOCK_MODES    = (10 << KEYMASTER_REQ_SHIFT),
++    KM_GET_SUPPORTED_PADDING_MODES  = (11 << KEYMASTER_REQ_SHIFT),
++    KM_GET_SUPPORTED_DIGESTS        = (12 << KEYMASTER_REQ_SHIFT),
++    KM_GET_SUPPORTED_IMPORT_FORMATS = (13 << KEYMASTER_REQ_SHIFT),
++    KM_GET_SUPPORTED_EXPORT_FORMATS = (14 << KEYMASTER_REQ_SHIFT),
++    KM_GET_KEY_CHARACTERISTICS      = (15 << KEYMASTER_REQ_SHIFT),
++    KM_ATTEST_KEY                   = (16 << KEYMASTER_REQ_SHIFT),
++    KM_UPGRADE_KEY                  = (17 << KEYMASTER_REQ_SHIFT),
++    KM_CONFIGURE                    = (18 << KEYMASTER_REQ_SHIFT),
++};
++
++#ifdef __ANDROID__
++
++/**
++ * keymaster_message - Serial header for communicating with KM server
++ * @cmd: the command, one of keymaster_command.
++ * @payload: start of the serialized command specific payload
++ */
++struct keymaster_message {
++    uint32_t cmd;
++    uint8_t payload[0];
++};
++
++#endif
+diff --git a/keymaster/keymaster_module.cpp b/keymaster/keymaster_module.cpp
+new file mode 100644
+index 0000000..66c468e
+--- /dev/null
++++ b/keymaster/keymaster_module.cpp
+@@ -0,0 +1,69 @@
++/*
++ * Copyright (C) 2014 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#include <errno.h>
++#include <string.h>
++
++#include <hardware/hardware.h>
++#include <hardware/keymaster0.h>
++#include <keymaster/soft_keymaster_device.h>
++
++#include "trusty_keymaster_device.h"
++#include "trusty_keymaster_ipc.h"
++
++using keymaster::TrustyKeymasterDevice;
++
++/*
++ * Generic device handling
++ */
++static int trusty_keymaster_open(const hw_module_t* module, const char* name, hw_device_t** device) {
++    if (strcmp(name, KEYSTORE_KEYMASTER) != 0) {
++        return -EINVAL;
++    }
++
++    int rc = trusty_keymaster_connect();
++    if (rc < 0) {
++        *device = reinterpret_cast<hw_device_t*>((new keymaster::SoftKeymasterDevice())->keymaster2_device());
++        return 0;
++    }
++
++    TrustyKeymasterDevice* dev = new TrustyKeymasterDevice(module);
++    if (dev == NULL) {
++        return -ENOMEM;
++    }
++    *device = dev->hw_device();
++    // Do not delete dev; it will get cleaned up when the caller calls device->close(), and must
++    // exist until then.
++    return 0;
++}
++
++static struct hw_module_methods_t keystore_module_methods = {
++    .open = trusty_keymaster_open,
++};
++
++struct keystore_module HAL_MODULE_INFO_SYM __attribute__((visibility("default"))) = {
++    .common =
++        {
++            .tag = HARDWARE_MODULE_TAG,
++            .module_api_version = KEYMASTER_MODULE_API_VERSION_2_0,
++            .hal_api_version = HARDWARE_HAL_API_VERSION,
++            .id = KEYSTORE_HARDWARE_MODULE_ID,
++            .name = "Trusty Keymaster HAL",
++            .author = "The Android Open Source Project",
++            .methods = &keystore_module_methods,
++            .dso = 0,
++            .reserved = {},
++        },
++};
+diff --git a/keymaster/trusty_keymaster_device.cpp b/keymaster/trusty_keymaster_device.cpp
+new file mode 100644
+index 0000000..2afb1a9
+--- /dev/null
++++ b/keymaster/trusty_keymaster_device.cpp
+@@ -0,0 +1,792 @@
++/*
++ * Copyright 2014 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "TrustyKeymaster"
++
++#include <assert.h>
++#include <openssl/evp.h>
++#include <openssl/x509.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#include <algorithm>
++#include <type_traits>
++
++#include <hardware/keymaster2.h>
++#include <keymaster/authorization_set.h>
++#include <log/log.h>
++
++#include "keymaster_ipc.h"
++#include "trusty_keymaster_device.h"
++#include "trusty_keymaster_ipc.h"
++
++#define MY_PAGE_SIZE (PAGE_SIZE * 128)
++const uint32_t RECV_BUF_SIZE = MY_PAGE_SIZE;
++const uint32_t SEND_BUF_SIZE = (MY_PAGE_SIZE - sizeof(struct keymaster_message) - 16 /* tipc header */);
++
++const size_t kMaximumAttestationChallengeLength = 128;
++const size_t kMaximumFinishInputLength = 2048 * 1024;
++
++namespace keymaster {
++
++static keymaster_error_t translate_error(int err) {
++    switch (err) {
++        case 0:
++            return KM_ERROR_OK;
++        case -EPERM:
++        case -EACCES:
++            return KM_ERROR_SECURE_HW_ACCESS_DENIED;
++
++        case -ECANCELED:
++            return KM_ERROR_OPERATION_CANCELLED;
++
++        case -ENODEV:
++            return KM_ERROR_UNIMPLEMENTED;
++
++        case -ENOMEM:
++            return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++
++        case -EBUSY:
++            return KM_ERROR_SECURE_HW_BUSY;
++
++        case -EIO:
++            return KM_ERROR_SECURE_HW_COMMUNICATION_FAILED;
++
++        case -EOVERFLOW:
++            return KM_ERROR_INVALID_INPUT_LENGTH;
++
++        default:
++            return KM_ERROR_UNKNOWN_ERROR;
++    }
++}
++
++TrustyKeymasterDevice::TrustyKeymasterDevice(const hw_module_t* module) {
++    static_assert(std::is_standard_layout<TrustyKeymasterDevice>::value,
++                  "TrustyKeymasterDevice must be standard layout");
++    static_assert(offsetof(TrustyKeymasterDevice, device_) == 0,
++                  "device_ must be the first member of TrustyKeymasterDevice");
++    static_assert(offsetof(TrustyKeymasterDevice, device_.common) == 0,
++                  "common must be the first member of keymaster2_device");
++
++    ALOGI("Creating device");
++    ALOGD("Device address: %p", this);
++
++    device_ = {};
++
++    device_.common.tag = HARDWARE_DEVICE_TAG;
++    device_.common.version = 1;
++    device_.common.module = const_cast<hw_module_t*>(module);
++    device_.common.close = close_device;
++
++    device_.flags = KEYMASTER_SUPPORTS_EC | KEYMASTER_BLOBS_ARE_STANDALONE ;
++
++    device_.configure = configure;
++    device_.add_rng_entropy = add_rng_entropy;
++    device_.generate_key = generate_key;
++    device_.get_key_characteristics = get_key_characteristics;
++    device_.import_key = import_key;
++    device_.export_key = export_key;
++    device_.attest_key = attest_key;
++    device_.upgrade_key = upgrade_key;
++    device_.delete_key = nullptr;
++    device_.delete_all_keys = nullptr;
++    device_.begin = begin;
++    device_.update = update;
++    device_.finish = finish;
++    device_.abort = abort;
++
++    GetVersionRequest version_request;
++    GetVersionResponse version_response;
++    error_ = Send(KM_GET_VERSION, version_request, &version_response);
++    if (error_ == KM_ERROR_INVALID_ARGUMENT || error_ == KM_ERROR_UNIMPLEMENTED) {
++        ALOGE("\"Bad parameters\" error on GetVersion call.  Version 0 is not supported.");
++        error_ = KM_ERROR_VERSION_MISMATCH;
++        return;
++    }
++    message_version_ = MessageVersion(version_response.major_ver, version_response.minor_ver,
++                                      version_response.subminor_ver);
++    if (message_version_ < 0) {
++        // Can't translate version?  Keymaster implementation must be newer.
++        ALOGE("Keymaster version %d.%d.%d not supported.", version_response.major_ver,
++              version_response.minor_ver, version_response.subminor_ver);
++        error_ = KM_ERROR_VERSION_MISMATCH;
++    }
++}
++
++TrustyKeymasterDevice::~TrustyKeymasterDevice() {
++    trusty_keymaster_disconnect();
++}
++
++namespace {
++
++// Allocates a new buffer with malloc and copies the contents of |buffer| to it. Caller takes
++// ownership of the returned buffer.
++uint8_t* DuplicateBuffer(const uint8_t* buffer, size_t size) {
++    uint8_t* tmp = reinterpret_cast<uint8_t*>(malloc(size));
++    if (tmp) {
++        memcpy(tmp, buffer, size);
++    }
++    return tmp;
++}
++
++template <typename RequestType>
++void AddClientAndAppData(const keymaster_blob_t* client_id, const keymaster_blob_t* app_data,
++                         RequestType* request) {
++    request->additional_params.Clear();
++    if (client_id) {
++        request->additional_params.push_back(TAG_APPLICATION_ID, *client_id);
++    }
++    if (app_data) {
++        request->additional_params.push_back(TAG_APPLICATION_DATA, *app_data);
++    }
++}
++
++}  //  unnamed namespace
++
++keymaster_error_t TrustyKeymasterDevice::configure(const keymaster_key_param_set_t* params) {
++    ALOGD("Device received configure\n");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!params) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++
++    AuthorizationSet params_copy(*params);
++    ConfigureRequest request;
++    if (!params_copy.GetTagValue(TAG_OS_VERSION, &request.os_version) ||
++        !params_copy.GetTagValue(TAG_OS_PATCHLEVEL, &request.os_patchlevel)) {
++        ALOGD("Configuration parameters must contain OS version and patch level");
++        return KM_ERROR_INVALID_ARGUMENT;
++    }
++
++    ConfigureResponse response;
++    keymaster_error_t err = Send(KM_CONFIGURE, request, &response);
++    return err;
++}
++
++keymaster_error_t TrustyKeymasterDevice::add_rng_entropy(const uint8_t* data, size_t data_length) {
++    ALOGD("Device received add_rng_entropy");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++
++    AddEntropyRequest request;
++    request.random_data.Reinitialize(data, data_length);
++    AddEntropyResponse response;
++    return Send(KM_ADD_RNG_ENTROPY, request, &response);
++}
++
++keymaster_error_t TrustyKeymasterDevice::generate_key(
++    const keymaster_key_param_set_t* params, keymaster_key_blob_t* key_blob,
++    keymaster_key_characteristics_t* characteristics) {
++    ALOGD("Device received generate_key");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!params) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!key_blob) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    GenerateKeyRequest request(message_version_);
++    request.key_description.Reinitialize(*params);
++    //request.key_description.push_back(TAG_CREATION_DATETIME, java_time(time(NULL)));
++
++    GenerateKeyResponse response(message_version_);
++    keymaster_error_t err = Send(KM_GENERATE_KEY, request, &response);
++    if (err != KM_ERROR_OK) {
++        ALOGD("Device generate_key return error code %d", err);
++        return err;
++    }
++
++    key_blob->key_material_size = response.key_blob.key_material_size;
++    key_blob->key_material =
++        DuplicateBuffer(response.key_blob.key_material, response.key_blob.key_material_size);
++    if (!key_blob->key_material) {
++        return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++    }
++
++    if (characteristics) {
++        response.enforced.CopyToParamSet(&characteristics->hw_enforced);
++        response.unenforced.CopyToParamSet(&characteristics->sw_enforced);
++    }
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::get_key_characteristics(
++    const keymaster_key_blob_t* key_blob, const keymaster_blob_t* client_id,
++    const keymaster_blob_t* app_data, keymaster_key_characteristics_t* characteristics) {
++    ALOGD("Device received get_key_characteristics");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!key_blob || !key_blob->key_material) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!characteristics) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    GetKeyCharacteristicsRequest request;
++    request.SetKeyMaterial(*key_blob);
++    AddClientAndAppData(client_id, app_data, &request);
++
++    GetKeyCharacteristicsResponse response;
++    keymaster_error_t err = Send(KM_GET_KEY_CHARACTERISTICS, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    response.enforced.CopyToParamSet(&characteristics->hw_enforced);
++    response.unenforced.CopyToParamSet(&characteristics->sw_enforced);
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::import_key(
++    const keymaster_key_param_set_t* params, keymaster_key_format_t key_format,
++    const keymaster_blob_t* key_data, keymaster_key_blob_t* key_blob,
++    keymaster_key_characteristics_t* characteristics) {
++    ALOGD("Device received import_key");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!params || !key_data) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!key_blob) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    ImportKeyRequest request(message_version_);
++    request.key_description.Reinitialize(*params);
++    //request.key_description.push_back(TAG_CREATION_DATETIME, java_time(time(NULL)));
++
++    request.key_format = key_format;
++    request.SetKeyMaterial(key_data->data, key_data->data_length);
++
++    ImportKeyResponse response(message_version_);
++    keymaster_error_t err = Send(KM_IMPORT_KEY, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    key_blob->key_material_size = response.key_blob.key_material_size;
++    key_blob->key_material =
++        DuplicateBuffer(response.key_blob.key_material, response.key_blob.key_material_size);
++    if (!key_blob->key_material) {
++        return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++    }
++
++    if (characteristics) {
++        response.enforced.CopyToParamSet(&characteristics->hw_enforced);
++        response.unenforced.CopyToParamSet(&characteristics->sw_enforced);
++    }
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::export_key(keymaster_key_format_t export_format,
++                                                    const keymaster_key_blob_t* key_to_export,
++                                                    const keymaster_blob_t* client_id,
++                                                    const keymaster_blob_t* app_data,
++                                                    keymaster_blob_t* export_data) {
++    ALOGD("Device received export_key");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!key_to_export || !key_to_export->key_material) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!export_data) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    export_data->data = nullptr;
++    export_data->data_length = 0;
++
++    ExportKeyRequest request(message_version_);
++    request.key_format = export_format;
++    request.SetKeyMaterial(*key_to_export);
++    AddClientAndAppData(client_id, app_data, &request);
++
++    ExportKeyResponse response(message_version_);
++    keymaster_error_t err = Send(KM_EXPORT_KEY, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    export_data->data_length = response.key_data_length;
++    export_data->data = DuplicateBuffer(response.key_data, response.key_data_length);
++    if (!export_data->data) {
++        return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++    }
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::attest_key(const keymaster_key_blob_t* key_to_attest,
++                                                    const keymaster_key_param_set_t* attest_params,
++                                                    keymaster_cert_chain_t* cert_chain) {
++    ALOGD("Device received attest_key");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!key_to_attest || !attest_params) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!cert_chain) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    cert_chain->entry_count = 0;
++    cert_chain->entries = nullptr;
++
++    AttestKeyRequest request;
++    request.SetKeyMaterial(*key_to_attest);
++    request.attest_params.Reinitialize(*attest_params);
++
++    keymaster_blob_t attestation_challenge = {};
++    request.attest_params.GetTagValue(TAG_ATTESTATION_CHALLENGE, &attestation_challenge);
++    if (attestation_challenge.data_length > kMaximumAttestationChallengeLength) {
++        ALOGE("%zu-byte attestation challenge; only %zu bytes allowed",
++              attestation_challenge.data_length, kMaximumAttestationChallengeLength);
++        return KM_ERROR_INVALID_INPUT_LENGTH;
++    }
++
++    AttestKeyResponse response;
++    keymaster_error_t err = Send(KM_ATTEST_KEY, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    // Allocate and clear storage for cert_chain.
++    keymaster_cert_chain_t& rsp_chain = response.certificate_chain;
++    cert_chain->entries = reinterpret_cast<keymaster_blob_t*>(
++        malloc(rsp_chain.entry_count * sizeof(*cert_chain->entries)));
++    if (!cert_chain->entries) {
++        return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++    }
++    cert_chain->entry_count = rsp_chain.entry_count;
++    for (keymaster_blob_t& entry : array_range(cert_chain->entries, cert_chain->entry_count)) {
++        entry = {};
++    }
++
++    // Copy cert_chain contents
++    size_t i = 0;
++    for (keymaster_blob_t& entry : array_range(rsp_chain.entries, rsp_chain.entry_count)) {
++        cert_chain->entries[i].data = DuplicateBuffer(entry.data, entry.data_length);
++        if (!cert_chain->entries[i].data) {
++            keymaster_free_cert_chain(cert_chain);
++            return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++        }
++        cert_chain->entries[i].data_length = entry.data_length;
++        ++i;
++    }
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::upgrade_key(const keymaster_key_blob_t* key_to_upgrade,
++                                                     const keymaster_key_param_set_t* upgrade_params,
++                                                     keymaster_key_blob_t* upgraded_key) {
++    ALOGD("Device received upgrade_key");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!key_to_upgrade || !upgrade_params) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!upgraded_key) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    UpgradeKeyRequest request;
++    request.SetKeyMaterial(*key_to_upgrade);
++    request.upgrade_params.Reinitialize(*upgrade_params);
++
++    UpgradeKeyResponse response;
++    keymaster_error_t err = Send(KM_UPGRADE_KEY, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    upgraded_key->key_material_size = response.upgraded_key.key_material_size;
++    upgraded_key->key_material = DuplicateBuffer(response.upgraded_key.key_material,
++                                                 response.upgraded_key.key_material_size);
++    if (!upgraded_key->key_material) {
++        return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++    }
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::begin(keymaster_purpose_t purpose,
++                                               const keymaster_key_blob_t* key,
++                                               const keymaster_key_param_set_t* in_params,
++                                               keymaster_key_param_set_t* out_params,
++                                               keymaster_operation_handle_t* operation_handle) {
++    ALOGD("Device received begin");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!key || !key->key_material) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!operation_handle) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    if (out_params) {
++        *out_params = {};
++    }
++
++    BeginOperationRequest request;
++    request.purpose = purpose;
++    request.SetKeyMaterial(*key);
++    request.additional_params.Reinitialize(*in_params);
++
++    BeginOperationResponse response;
++    keymaster_error_t err = Send(KM_BEGIN_OPERATION, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    if (response.output_params.size() > 0) {
++        if (out_params) {
++            response.output_params.CopyToParamSet(out_params);
++        } else {
++            return KM_ERROR_OUTPUT_PARAMETER_NULL;
++        }
++    }
++    *operation_handle = response.op_handle;
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::update(keymaster_operation_handle_t operation_handle,
++                                                const keymaster_key_param_set_t* in_params,
++                                                const keymaster_blob_t* input,
++                                                size_t* input_consumed,
++                                                keymaster_key_param_set_t* out_params,
++                                                keymaster_blob_t* output) {
++    ALOGD("Device received update");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (!input) {
++        return KM_ERROR_UNEXPECTED_NULL_POINTER;
++    }
++    if (!input_consumed) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    if (out_params) {
++        *out_params = {};
++    }
++    if (output) {
++        *output = {};
++    }
++
++    UpdateOperationRequest request;
++    request.op_handle = operation_handle;
++    if (in_params) {
++        request.additional_params.Reinitialize(*in_params);
++    }
++    if (input && input->data_length > 0) {
++        size_t max_input_size = SEND_BUF_SIZE - request.SerializedSize();
++        request.input.Reinitialize(input->data, std::min(input->data_length, max_input_size));
++    }
++
++    UpdateOperationResponse response;
++    keymaster_error_t err = Send(KM_UPDATE_OPERATION, request, &response);
++    if (err != KM_ERROR_OK) {
++        return err;
++    }
++
++    if (response.output_params.size() > 0) {
++        if (out_params) {
++            response.output_params.CopyToParamSet(out_params);
++        } else {
++            return KM_ERROR_OUTPUT_PARAMETER_NULL;
++        }
++    }
++    *input_consumed = response.input_consumed;
++    if (output) {
++        output->data_length = response.output.available_read();
++        output->data = DuplicateBuffer(response.output.peek_read(), output->data_length);
++        if (!output->data) {
++            return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++        }
++    } else if (response.output.available_read() > 0) {
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::finish(keymaster_operation_handle_t operation_handle,
++                                                const keymaster_key_param_set_t* in_params,
++                                                const keymaster_blob_t* input,
++                                                const keymaster_blob_t* signature,
++                                                keymaster_key_param_set_t* out_params,
++                                                keymaster_blob_t* output) {
++    ALOGE("Device received finish");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++    if (input && input->data_length > kMaximumFinishInputLength) {
++    ALOGE("here %s at %d", __func__, __LINE__);
++        return KM_ERROR_INVALID_ARGUMENT;
++    }
++
++    if (out_params) {
++        *out_params = {};
++    }
++    if (output) {
++        *output = {};
++    }
++
++    FinishOperationRequest request;
++    request.op_handle = operation_handle;
++    if (signature && signature->data && signature->data_length > 0) {
++        request.signature.Reinitialize(signature->data, signature->data_length);
++        ALOGE("here %s at %d signature length %d", __func__, __LINE__,
++                (int)(signature->data_length));
++    }
++    if (input && input->data && input->data_length) {
++        request.input.Reinitialize(input->data, input->data_length);
++        ALOGE("here %s at %d input data length %d", __func__, __LINE__,
++                (int)(input->data_length));
++    }
++    if (in_params) {
++        request.additional_params.Reinitialize(*in_params);
++    }
++
++    FinishOperationResponse response;
++    keymaster_error_t err = Send(KM_FINISH_OPERATION, request, &response);
++    if (err != KM_ERROR_OK) {
++    ALOGE("here %s at %d", __func__, __LINE__);
++        return err;
++    }
++
++    if (response.output_params.size() > 0) {
++        if (out_params) {
++            response.output_params.CopyToParamSet(out_params);
++        } else {
++    ALOGE("here %s at %d", __func__, __LINE__);
++            return KM_ERROR_OUTPUT_PARAMETER_NULL;
++        }
++    }
++    if (output) {
++        output->data_length = response.output.available_read();
++        output->data = DuplicateBuffer(response.output.peek_read(), output->data_length);
++        if (!output->data) {
++            ALOGE("here %s at %d", __func__, __LINE__);
++            return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++        } else {
++            ALOGE("here %s at %d output data length %d", __func__, __LINE__,
++                    (int)(output->data_length));
++        }
++    } else if (response.output.available_read() > 0) {
++        ALOGE("here %s at %d", __func__, __LINE__);
++        return KM_ERROR_OUTPUT_PARAMETER_NULL;
++    }
++
++    ALOGE("OK here %s at %d", __func__, __LINE__);
++    return KM_ERROR_OK;
++}
++
++keymaster_error_t TrustyKeymasterDevice::abort(keymaster_operation_handle_t operation_handle) {
++    ALOGD("Device received abort");
++
++    if (error_ != KM_ERROR_OK) {
++        return error_;
++    }
++
++    AbortOperationRequest request;
++    request.op_handle = operation_handle;
++    AbortOperationResponse response;
++    return Send(KM_ABORT_OPERATION, request, &response);
++}
++
++hw_device_t* TrustyKeymasterDevice::hw_device() {
++    return &device_.common;
++}
++
++static inline TrustyKeymasterDevice* convert_device(const keymaster2_device_t* dev) {
++    return reinterpret_cast<TrustyKeymasterDevice*>(const_cast<keymaster2_device_t*>(dev));
++}
++
++/* static */
++int TrustyKeymasterDevice::close_device(hw_device_t* dev) {
++    delete reinterpret_cast<TrustyKeymasterDevice*>(dev);
++    return 0;
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::configure(const keymaster2_device_t* dev,
++                                                   const keymaster_key_param_set_t* params) {
++    return convert_device(dev)->configure(params);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::add_rng_entropy(const keymaster2_device_t* dev,
++                                                         const uint8_t* data, size_t data_length) {
++    return convert_device(dev)->add_rng_entropy(data, data_length);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::generate_key(
++    const keymaster2_device_t* dev, const keymaster_key_param_set_t* params,
++    keymaster_key_blob_t* key_blob, keymaster_key_characteristics_t* characteristics) {
++    return convert_device(dev)->generate_key(params, key_blob, characteristics);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::get_key_characteristics(
++    const keymaster2_device_t* dev, const keymaster_key_blob_t* key_blob,
++    const keymaster_blob_t* client_id, const keymaster_blob_t* app_data,
++    keymaster_key_characteristics_t* characteristics) {
++    return convert_device(dev)->get_key_characteristics(key_blob, client_id, app_data,
++                                                        characteristics);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::import_key(
++    const keymaster2_device_t* dev, const keymaster_key_param_set_t* params,
++    keymaster_key_format_t key_format, const keymaster_blob_t* key_data,
++    keymaster_key_blob_t* key_blob, keymaster_key_characteristics_t* characteristics) {
++    return convert_device(dev)->import_key(params, key_format, key_data, key_blob, characteristics);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::export_key(const keymaster2_device_t* dev,
++                                                    keymaster_key_format_t export_format,
++                                                    const keymaster_key_blob_t* key_to_export,
++                                                    const keymaster_blob_t* client_id,
++                                                    const keymaster_blob_t* app_data,
++                                                    keymaster_blob_t* export_data) {
++    return convert_device(dev)->export_key(export_format, key_to_export, client_id, app_data,
++                                           export_data);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::attest_key(const keymaster2_device_t* dev,
++                                                    const keymaster_key_blob_t* key_to_attest,
++                                                    const keymaster_key_param_set_t* attest_params,
++                                                    keymaster_cert_chain_t* cert_chain) {
++    return convert_device(dev)->attest_key(key_to_attest, attest_params, cert_chain);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::upgrade_key(const keymaster2_device_t* dev,
++                                                     const keymaster_key_blob_t* key_to_upgrade,
++                                                     const keymaster_key_param_set_t* upgrade_params,
++                                                     keymaster_key_blob_t* upgraded_key) {
++    return convert_device(dev)->upgrade_key(key_to_upgrade, upgrade_params, upgraded_key);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::begin(const keymaster2_device_t* dev,
++                                               keymaster_purpose_t purpose,
++                                               const keymaster_key_blob_t* key,
++                                               const keymaster_key_param_set_t* in_params,
++                                               keymaster_key_param_set_t* out_params,
++                                               keymaster_operation_handle_t* operation_handle) {
++    return convert_device(dev)->begin(purpose, key, in_params, out_params, operation_handle);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::update(
++    const keymaster2_device_t* dev, keymaster_operation_handle_t operation_handle,
++    const keymaster_key_param_set_t* in_params, const keymaster_blob_t* input,
++    size_t* input_consumed, keymaster_key_param_set_t* out_params, keymaster_blob_t* output) {
++    return convert_device(dev)->update(operation_handle, in_params, input, input_consumed,
++                                       out_params, output);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::finish(const keymaster2_device_t* dev,
++                                                keymaster_operation_handle_t operation_handle,
++                                                const keymaster_key_param_set_t* in_params,
++                                                const keymaster_blob_t* input,
++                                                const keymaster_blob_t* signature,
++                                                keymaster_key_param_set_t* out_params,
++                                                keymaster_blob_t* output) {
++    return convert_device(dev)->finish(operation_handle, in_params, input, signature, out_params,
++                                       output);
++}
++
++/* static */
++keymaster_error_t TrustyKeymasterDevice::abort(const keymaster2_device_t* dev,
++                                               keymaster_operation_handle_t operation_handle) {
++    return convert_device(dev)->abort(operation_handle);
++}
++
++keymaster_error_t TrustyKeymasterDevice::Send(uint32_t command, const Serializable& req,
++                                              KeymasterResponse* rsp) {
++    uint32_t req_size = req.SerializedSize();
++    if (req_size > SEND_BUF_SIZE) {
++        return KM_ERROR_MEMORY_ALLOCATION_FAILED;
++    }
++    uint8_t send_buf[SEND_BUF_SIZE];
++    Eraser send_buf_eraser(send_buf, SEND_BUF_SIZE);
++    req.Serialize(send_buf, send_buf + req_size);
++
++    // Send it
++    uint8_t recv_buf[RECV_BUF_SIZE];
++    Eraser recv_buf_eraser(recv_buf, RECV_BUF_SIZE);
++    uint32_t rsp_size = RECV_BUF_SIZE;
++    // ALOGE("Sending %d byte request\n", (int)req.SerializedSize());
++    int rc = trusty_keymaster_call(command, send_buf, req_size, recv_buf, &rsp_size);
++    if (rc < 0) {
++        ALOGE("tipc error: %d\n", rc);
++        return translate_error(rc);
++    } else {
++        ALOGE("Received %d byte response\n", (int)rsp_size);
++    }
++
++    const uint8_t* p = recv_buf;
++    if (!rsp->Deserialize(&p, p + rsp_size)) {
++        ALOGE("Error deserializing response of size %d\n", (int)rsp_size);
++        return KM_ERROR_UNKNOWN_ERROR;
++    } else if (rsp->error != KM_ERROR_OK) {
++        ALOGE("Error: Response of size %d contained error code %d\n", (int)rsp_size, (int)rsp->error);
++        return rsp->error;
++    }
++    return rsp->error;
++}
++
++}  // namespace keymaster
+diff --git a/keymaster/trusty_keymaster_device.h b/keymaster/trusty_keymaster_device.h
+new file mode 100644
+index 0000000..cfada1b
+--- /dev/null
++++ b/keymaster/trusty_keymaster_device.h
+@@ -0,0 +1,153 @@
++/*
++ * Copyright 2014 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef TRUSTY_KEYMASTER_TRUSTY_KEYMASTER_DEVICE_H_
++#define TRUSTY_KEYMASTER_TRUSTY_KEYMASTER_DEVICE_H_
++
++#include <hardware/keymaster2.h>
++#include <keymaster/android_keymaster_messages.h>
++
++namespace keymaster {
++
++/**
++ * Trusty Keymaster device.
++ *
++ * IMPORTANT MAINTAINER NOTE: Pointers to instances of this class must be castable to hw_device_t
++ * and keymaster_device. This means it must remain a standard layout class (no virtual functions and
++ * no data members which aren't standard layout), and device_ must be the first data member.
++ * Assertions in the constructor validate compliance with those constraints.
++ */
++class TrustyKeymasterDevice {
++  public:
++    /*
++     * These are the only symbols that will be exported by libtrustykeymaster.  All functionality
++     * can be reached via the function pointers in device_.
++     */
++    __attribute__((visibility("default"))) explicit TrustyKeymasterDevice(const hw_module_t* module);
++    __attribute__((visibility("default"))) hw_device_t* hw_device();
++
++    ~TrustyKeymasterDevice();
++
++    keymaster_error_t session_error() { return error_; }
++
++    keymaster_error_t configure(const keymaster_key_param_set_t* params);
++    keymaster_error_t add_rng_entropy(const uint8_t* data, size_t data_length);
++    keymaster_error_t generate_key(const keymaster_key_param_set_t* params,
++                                   keymaster_key_blob_t* key_blob,
++                                   keymaster_key_characteristics_t* characteristics);
++    keymaster_error_t get_key_characteristics(const keymaster_key_blob_t* key_blob,
++                                              const keymaster_blob_t* client_id,
++                                              const keymaster_blob_t* app_data,
++                                              keymaster_key_characteristics_t* character);
++    keymaster_error_t import_key(const keymaster_key_param_set_t* params,
++                                 keymaster_key_format_t key_format,
++                                 const keymaster_blob_t* key_data, keymaster_key_blob_t* key_blob,
++                                 keymaster_key_characteristics_t* characteristics);
++    keymaster_error_t export_key(keymaster_key_format_t export_format,
++                                 const keymaster_key_blob_t* key_to_export,
++                                 const keymaster_blob_t* client_id,
++                                 const keymaster_blob_t* app_data, keymaster_blob_t* export_data);
++    keymaster_error_t attest_key(const keymaster_key_blob_t* key_to_attest,
++                                 const keymaster_key_param_set_t* attest_params,
++                                 keymaster_cert_chain_t* cert_chain);
++    keymaster_error_t upgrade_key(const keymaster_key_blob_t* key_to_upgrade,
++                                  const keymaster_key_param_set_t* upgrade_params,
++                                  keymaster_key_blob_t* upgraded_key);
++    keymaster_error_t begin(keymaster_purpose_t purpose, const keymaster_key_blob_t* key,
++                            const keymaster_key_param_set_t* in_params,
++                            keymaster_key_param_set_t* out_params,
++                            keymaster_operation_handle_t* operation_handle);
++    keymaster_error_t update(keymaster_operation_handle_t operation_handle,
++                             const keymaster_key_param_set_t* in_params,
++                             const keymaster_blob_t* input, size_t* input_consumed,
++                             keymaster_key_param_set_t* out_params, keymaster_blob_t* output);
++    keymaster_error_t finish(keymaster_operation_handle_t operation_handle,
++                             const keymaster_key_param_set_t* in_params,
++                             const keymaster_blob_t* input, const keymaster_blob_t* signature,
++                             keymaster_key_param_set_t* out_params, keymaster_blob_t* output);
++    keymaster_error_t abort(keymaster_operation_handle_t operation_handle);
++
++  private:
++    keymaster_error_t Send(uint32_t command, const Serializable& request,
++                           KeymasterResponse* response);
++
++    /*
++     * These static methods are the functions referenced through the function pointers in
++     * keymaster_device.  They're all trivial wrappers.
++     */
++    static int close_device(hw_device_t* dev);
++    static keymaster_error_t configure(const keymaster2_device_t* dev,
++                                       const keymaster_key_param_set_t* params);
++    static keymaster_error_t add_rng_entropy(const keymaster2_device_t* dev, const uint8_t* data,
++                                             size_t data_length);
++    static keymaster_error_t generate_key(const keymaster2_device_t* dev,
++                                          const keymaster_key_param_set_t* params,
++                                          keymaster_key_blob_t* key_blob,
++                                          keymaster_key_characteristics_t* characteristics);
++    static keymaster_error_t get_key_characteristics(const keymaster2_device_t* dev,
++                                                     const keymaster_key_blob_t* key_blob,
++                                                     const keymaster_blob_t* client_id,
++                                                     const keymaster_blob_t* app_data,
++                                                     keymaster_key_characteristics_t* character);
++    static keymaster_error_t import_key(const keymaster2_device_t* dev,
++                                        const keymaster_key_param_set_t* params,
++                                        keymaster_key_format_t key_format,
++                                        const keymaster_blob_t* key_data,
++                                        keymaster_key_blob_t* key_blob,
++                                        keymaster_key_characteristics_t* characteristics);
++    static keymaster_error_t export_key(const keymaster2_device_t* dev,
++                                        keymaster_key_format_t export_format,
++                                        const keymaster_key_blob_t* key_to_export,
++                                        const keymaster_blob_t* client_id,
++                                        const keymaster_blob_t* app_data,
++                                        keymaster_blob_t* export_data);
++    static keymaster_error_t attest_key(const keymaster2_device_t* dev,
++                                        const keymaster_key_blob_t* key_to_attest,
++                                        const keymaster_key_param_set_t* attest_params,
++                                        keymaster_cert_chain_t* cert_chain);
++    static keymaster_error_t upgrade_key(const keymaster2_device_t* dev,
++                                         const keymaster_key_blob_t* key_to_upgrade,
++                                         const keymaster_key_param_set_t* upgrade_params,
++                                         keymaster_key_blob_t* upgraded_key);
++    static keymaster_error_t delete_key(const keymaster2_device_t* dev,
++                                        const keymaster_key_blob_t* key);
++    static keymaster_error_t delete_all_keys(const keymaster2_device_t* dev);
++    static keymaster_error_t begin(const keymaster2_device_t* dev, keymaster_purpose_t purpose,
++                                   const keymaster_key_blob_t* key,
++                                   const keymaster_key_param_set_t* in_params,
++                                   keymaster_key_param_set_t* out_params,
++                                   keymaster_operation_handle_t* operation_handle);
++    static keymaster_error_t update(const keymaster2_device_t* dev,
++                                    keymaster_operation_handle_t operation_handle,
++                                    const keymaster_key_param_set_t* in_params,
++                                    const keymaster_blob_t* input, size_t* input_consumed,
++                                    keymaster_key_param_set_t* out_params, keymaster_blob_t* output);
++    static keymaster_error_t finish(const keymaster2_device_t* dev,
++                                    keymaster_operation_handle_t operation_handle,
++                                    const keymaster_key_param_set_t* in_params,
++                                    const keymaster_blob_t* input, const keymaster_blob_t* signature,
++                                    keymaster_key_param_set_t* out_params, keymaster_blob_t* output);
++    static keymaster_error_t abort(const keymaster2_device_t* dev,
++                                   keymaster_operation_handle_t operation_handle);
++
++    keymaster2_device_t device_;
++    keymaster_error_t error_;
++    int32_t message_version_;
++};
++
++}  // namespace keymaster
++
++#endif  // TRUSTY_KEYMASTER_TRUSTY_KEYMASTER_DEVICE_H_
+diff --git a/keymaster/trusty_keymaster_ipc.cpp b/keymaster/trusty_keymaster_ipc.cpp
+new file mode 100644
+index 0000000..381ba4a
+--- /dev/null
++++ b/keymaster/trusty_keymaster_ipc.cpp
+@@ -0,0 +1,105 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "TrustyKeymaster"
++
++// TODO: make this generic in libtrusty
++
++#include <assert.h>
++#include <errno.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <log/log.h>
++
++#include "keymaster_ipc.h"
++#include "trusty_keymaster_ipc.h"
++#include "qemud.h"
++
++#define KEYMASTER_SERVICE_NAME "KeymasterService3"
++
++static int handle_ = 0;
++
++int trusty_keymaster_connect() {
++    ALOGE("calling %s\n", __func__);
++    handle_ = qemu_pipe_open(KEYMASTER_SERVICE_NAME);
++    if (handle_ < 0) {
++        handle_ = 0;
++        ALOGE("failed to open %s pipe service", KEYMASTER_SERVICE_NAME);
++        ALOGE("calling %s failed\n", __func__);
++        return -1;
++    }
++    ALOGE("calling %s succeeded\n", __func__);
++    return 0;
++}
++
++int trusty_keymaster_call(uint32_t cmd, void* in, uint32_t in_size, uint8_t* out,
++                          uint32_t* out_size) {
++
++    size_t msg_size = in_size + sizeof(struct keymaster_message);
++    ALOGE("calling %s insize %d msg size %d\n", __func__, (int)in_size, (int) msg_size);
++    struct keymaster_message* msg = reinterpret_cast<struct keymaster_message*>(malloc(msg_size));
++    msg->cmd = cmd;
++    memcpy(msg->payload, in, in_size);
++
++    int pipe_command_length = msg_size;
++    assert(pipe_command_length > 0);
++    ssize_t rc = WriteFully(handle_, &pipe_command_length, sizeof(pipe_command_length));
++    if (rc < 1) {
++        ALOGE("failed to send msg_size (%d) for cmd (%d) to %s: %s\n", (int)(sizeof(pipe_command_length)),
++                (int)cmd, KEYMASTER_PORT, strerror(errno));
++        return -errno;
++    }
++
++    rc = WriteFully(handle_, msg, pipe_command_length);
++    if (in_size == 157 && cmd == KM_FINISH_OPERATION) {
++        for (int i=0; i < (int)in_size; ++i) {
++            ALOGE("pay[%d]: %d", i, (int)(msg->payload[i]));
++        }
++    }
++    free(msg);
++
++
++    if (rc < 1) {
++        ALOGE("failed to send cmd (%d) to %s: %s\n", cmd, KEYMASTER_PORT, strerror(errno));
++        return -errno;
++    }
++
++    rc = ReadFully(handle_, &pipe_command_length, sizeof(pipe_command_length));
++    if (rc < 1) {
++        ALOGE("failed to retrieve response length for cmd (%d) to %s: %s\n", cmd, KEYMASTER_PORT,
++              strerror(errno));
++        return -errno;
++    }
++
++    rc = ReadFully(handle_, out, pipe_command_length);
++    if (rc < 1) {
++        ALOGE("failed to retrieve response for cmd (%d) to %s: %s\n", cmd, KEYMASTER_PORT,
++              strerror(errno));
++        return -errno;
++    }
++    *out_size = pipe_command_length;
++    return pipe_command_length;
++}
++
++void trusty_keymaster_disconnect() {
++    ALOGE("calling %s\n", __func__);
++    if (handle_ != 0) {
++        close(handle_);
++        handle_ = 0;
++    }
++}
+diff --git a/keymaster/trusty_keymaster_ipc.h b/keymaster/trusty_keymaster_ipc.h
+new file mode 100644
+index 0000000..c15f7c1
+--- /dev/null
++++ b/keymaster/trusty_keymaster_ipc.h
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef TRUSTY_KEYMASTER_TRUSTY_KEYMASTER_IPC_H_
++#define TRUSTY_KEYMASTER_TRUSTY_KEYMASTER_IPC_H_
++
++__BEGIN_DECLS
++
++int trusty_keymaster_connect(void);
++int trusty_keymaster_call(uint32_t cmd, void* in, uint32_t in_size, uint8_t* out,
++                          uint32_t* out_size);
++void trusty_keymaster_disconnect(void);
++
++__END_DECLS
++
++#endif  // TRUSTY_KEYMASTER_TRUSTY_KEYMASTER_IPC_H_
+diff --git a/lights/Android.mk b/lights/Android.mk
+index dadcabc..41ab150 100644
+--- a/lights/Android.mk
++++ b/lights/Android.mk
+@@ -17,11 +17,12 @@ LOCAL_PATH := $(call my-dir)
+ # HAL module implemenation, not prelinked and stored in
+ # hw/<LIGHTS_HARDWARE_MODULE_ID>.<ro.hardware>.so
+ include $(CLEAR_VARS)
++LOCAL_RENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_SHARED_LIBRARIES := liblog libcutils
+ LOCAL_C_INC := lights_qemu.c
+ LOCAL_C_INCLUDES += $(LOCAL_PATH)/../include
+ LOCAL_SRC_FILES := lights_qemu.c
+-LOCAL_MODULE := lights.goldfish
++LOCAL_MODULE := lights.ranchu
+ LOCAL_CFLAGS += -DLIGHT_BACKLIGHT
+ include $(BUILD_SHARED_LIBRARY)
+diff --git a/manifest.xml b/manifest.xml
+index e4adfd6..0bb2e2a 100644
+--- a/manifest.xml
++++ b/manifest.xml
+@@ -1,25 +1,43 @@
+ <manifest version="1.0" type="device">
+     <hal format="hidl">
+         <name>android.hardware.drm</name>
+-        <transport arch="32">passthrough</transport>
+-        <impl level="generic"></impl>
++        <transport>hwbinder</transport>
+         <version>1.0</version>
+-        <!-- TODO(b/36371166): change to default -->
+         <interface>
+             <name>ICryptoFactory</name>
+-            <instance>crypto</instance>
++            <instance>default</instance>
++            <instance>widevine</instance>
+         </interface>
+         <interface>
+             <name>IDrmFactory</name>
+-            <instance>drm</instance>
++            <instance>default</instance>
++            <instance>widevine</instance>
+         </interface>
+     </hal>
+     <hal format="hidl">
+-        <name>android.hardware.graphics.mapper</name>
+-        <transport arch="32+64">passthrough</transport>
++        <name>android.hardware.soundtrigger</name>
++        <transport>hwbinder</transport>
+         <version>2.0</version>
+         <interface>
+-            <name>IMapper</name>
++            <name>ISoundTriggerHw</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.audio.effect</name>
++        <transport>hwbinder</transport>
++        <version>2.0</version>
++        <interface>
++            <name>IEffectsFactory</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.biometrics.fingerprint</name>
++        <transport>hwbinder</transport>
++        <version>2.1</version>
++        <interface>
++            <name>IBiometricsFingerprint</name>
+             <instance>default</instance>
+         </interface>
+     </hal>
+@@ -32,6 +50,33 @@
+             <instance>default</instance>
+         </interface>
+     </hal>
++    <hal format="hidl">
++        <name>android.hardware.audio</name>
++        <transport>hwbinder</transport>
++        <version>2.0</version>
++        <interface>
++            <name>IDevicesFactory</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.keymaster</name>
++        <transport>hwbinder</transport>
++        <version>3.0</version>
++        <interface>
++            <name>IKeymasterDevice</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.graphics.mapper</name>
++        <transport arch="32+64">passthrough</transport>
++        <version>2.0</version>
++        <interface>
++            <name>IMapper</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
+     <hal format="hidl">
+         <name>android.hardware.graphics.allocator</name>
+         <transport>hwbinder</transport>
+@@ -41,6 +86,15 @@
+             <instance>default</instance>
+         </interface>
+     </hal>
++    <hal format="hidl">
++        <name>android.hardware.graphics.composer</name>
++        <transport>hwbinder</transport>
++        <version>2.1</version>
++        <interface>
++            <name>IComposer</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
+     <hal format="hidl">
+         <name>android.hardware.power</name>
+         <transport>hwbinder</transport>
+@@ -50,4 +104,83 @@
+             <instance>default</instance>
+         </interface>
+     </hal>
++    <hal format="hidl">
++        <name>android.hardware.broadcastradio</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>IBroadcastRadioFactory</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.camera.provider</name>
++        <transport>hwbinder</transport>
++        <version>2.4</version>
++        <interface>
++            <name>ICameraProvider</name>
++            <instance>legacy/0</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.sensors</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>ISensors</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.gatekeeper</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>IGatekeeper</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.gnss</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>IGnss</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.media.omx</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>IOmx</name>
++            <instance>default</instance>
++        </interface>
++        <interface>
++            <name>IOmxStore</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.radio.deprecated</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>IOemHook</name>
++            <instance>slot1</instance>
++        </interface>
++    </hal>
++    <hal format="hidl">
++        <name>android.hardware.radio</name>
++        <transport>hwbinder</transport>
++        <version>1.0</version>
++        <interface>
++            <name>IRadio</name>
++            <instance>slot1</instance>
++        </interface>
++    </hal>
++    <sepolicy>
++        <version>10000.0</version>
++    </sepolicy>
+ </manifest>
+diff --git a/overlay/frameworks/base/core/res/res/values/config.xml b/overlay/frameworks/base/core/res/res/values/config.xml
+index fb7c56f..e7923e4 100644
+--- a/overlay/frameworks/base/core/res/res/values/config.xml
++++ b/overlay/frameworks/base/core/res/res/values/config.xml
+@@ -30,4 +30,10 @@
+     <!-- Set to true to add links to Cell Broadcast app from Settings and MMS app. -->
+     <bool name="config_cellBroadcastAppLinks">true</bool>
+ 
++    <!-- MMS user agent string -->
++    <string name="config_mms_user_agent" translatable="false">GoldfishNexus</string>
++
++    <!-- MMS user agent prolfile url -->
++    <string name="config_mms_user_agent_profile_url" translatable="false">http://gsm.lge.com/html/gsm/Nexus5-M3.xml</string>
++
+ </resources>
+diff --git a/overlay/frameworks/base/core/res/res/xml/config_webview_packages.xml b/overlay/frameworks/base/core/res/res/xml/config_webview_packages.xml
+index 883d660..0f27ad3 100644
+--- a/overlay/frameworks/base/core/res/res/xml/config_webview_packages.xml
++++ b/overlay/frameworks/base/core/res/res/xml/config_webview_packages.xml
+@@ -18,6 +18,9 @@
+ <!-- Signature checks are ignored if the package is preinstalled or if this is a userdebug or eng
+     build. If no signature is provided, the package can provide a WebView implementation only on userdebug/eng builds or if it's preinstalled -->
+ <webviewproviders>
++    <!-- The default WebView implementation -->
++    <webviewprovider description="Android WebView" packageName="com.android.webview" availableByDefault="true">
++    </webviewprovider>
+     <webviewprovider description="Chrome Stable" packageName="com.android.chrome" availableByDefault="true">
+         <!-- Ignore this package on user/release builds unless preinstalled. -->
+     </webviewprovider>
+diff --git a/overlay/frameworks/base/packages/SettingsProvider/res/values/defaults.xml b/overlay/frameworks/base/packages/SettingsProvider/res/values/defaults.xml
+index 56fbf89..6602627 100644
+--- a/overlay/frameworks/base/packages/SettingsProvider/res/values/defaults.xml
++++ b/overlay/frameworks/base/packages/SettingsProvider/res/values/defaults.xml
+@@ -18,9 +18,7 @@
+ -->
+ 
+ <resources>
+-    <!-- cannot set this to true because O-CTS is testing the keyguard b/37465076
+     <bool name="def_lockscreen_disabled">true</bool>
+-    -->
+ 
+     <!-- Allow users to use both the on-screen keyboard, as well as a real
+          keyboard -->
+diff --git a/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml b/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml
+new file mode 100644
+index 0000000..f5034ed
+--- /dev/null
++++ b/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml
+@@ -0,0 +1,11 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<!-- This is a place for vendor-specific config values. The format and
++     filtering rules are the same as those in carrier_config*.xml files. This
++     file is read after any specific config file from the assets folder, so it
++     must use explicit filters for MCC ad MNC if that is desired. -->
++
++<carrier_config_list>
++<carrier_config>
++<boolean name="enabledMMS" value="false"/>
++</carrier_config>
++</carrier_config_list>
+diff --git a/power/Android.mk b/power/Android.mk
+index 3839088..a4d4a2c 100644
+--- a/power/Android.mk
++++ b/power/Android.mk
+@@ -19,6 +19,7 @@ LOCAL_PATH := $(call my-dir)
+ # hw/<POWERS_HARDWARE_MODULE_ID>.<ro.hardware>.so
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_CFLAGS += -DQEMU_HARDWARE
+ LOCAL_SHARED_LIBRARIES := liblog libcutils
+@@ -30,6 +31,7 @@ include $(BUILD_SHARED_LIBRARY)
+ 
+ include $(CLEAR_VARS)
+ 
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_CFLAGS += -DQEMU_HARDWARE
+ LOCAL_SHARED_LIBRARIES := liblog libcutils
+diff --git a/qemu-props/Android.mk b/qemu-props/Android.mk
+index d2af64d..b1b14db 100644
+--- a/qemu-props/Android.mk
++++ b/qemu-props/Android.mk
+@@ -22,6 +22,7 @@ LOCAL_PATH := $(call my-dir)
+ # to setup various system properties sent by the emulator program.
+ #
+ include $(CLEAR_VARS)
++LOCAL_VENDOR_MODULE    := true
+ LOCAL_MODULE    := qemu-props
+ LOCAL_C_INCLUDES += $(LOCAL_PATH)/../include
+ LOCAL_SRC_FILES := qemu-props.c
+diff --git a/sensors/Android.mk b/sensors/Android.mk
+index e3df473..7a57bec 100644
+--- a/sensors/Android.mk
++++ b/sensors/Android.mk
+@@ -17,23 +17,9 @@ LOCAL_PATH := $(call my-dir)
+ 
+ # HAL module implemenation stored in
+ # hw/<SENSORS_HARDWARE_MODULE_ID>.<ro.hardware>.so
+-include $(CLEAR_VARS)
+-
+-LOCAL_MODULE_RELATIVE_PATH := hw
+-LOCAL_SHARED_LIBRARIES := liblog libcutils
+-LOCAL_C_INCLUDES += $(LOCAL_PATH)/../include
+-LOCAL_SRC_FILES := sensors_qemu.c
+-ifeq ($(TARGET_PRODUCT),vbox_x86)
+-LOCAL_MODULE := sensors.vbox_x86
+-else
+-LOCAL_MODULE := sensors.goldfish
+-endif
+-include $(BUILD_SHARED_LIBRARY)
+-
+-
+ 
+ include $(CLEAR_VARS)
+-
++LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_SHARED_LIBRARIES := liblog libcutils
+ LOCAL_C_INCLUDES += $(LOCAL_PATH)/../include
+diff --git a/sensors/sensors_qemu.c b/sensors/sensors_qemu.c
+index 9eee746..7954cf5 100644
+--- a/sensors/sensors_qemu.c
++++ b/sensors/sensors_qemu.c
+@@ -50,40 +50,46 @@
+ /** SENSOR IDS AND NAMES
+  **/
+ 
+-#define MAX_NUM_SENSORS 8
++#define MAX_NUM_SENSORS 10
+ 
+ #define SUPPORTED_SENSORS  ((1<<MAX_NUM_SENSORS)-1)
+ 
+-#define  ID_BASE           SENSORS_HANDLE_BASE
+-#define  ID_ACCELERATION   (ID_BASE+0)
+-#define  ID_MAGNETIC_FIELD (ID_BASE+1)
+-#define  ID_ORIENTATION    (ID_BASE+2)
+-#define  ID_TEMPERATURE    (ID_BASE+3)
+-#define  ID_PROXIMITY      (ID_BASE+4)
+-#define  ID_LIGHT          (ID_BASE+5)
+-#define  ID_PRESSURE       (ID_BASE+6)
+-#define  ID_HUMIDITY       (ID_BASE+7)
+-
+-#define  SENSORS_ACCELERATION    (1 << ID_ACCELERATION)
+-#define  SENSORS_MAGNETIC_FIELD  (1 << ID_MAGNETIC_FIELD)
+-#define  SENSORS_ORIENTATION     (1 << ID_ORIENTATION)
+-#define  SENSORS_TEMPERATURE     (1 << ID_TEMPERATURE)
+-#define  SENSORS_PROXIMITY       (1 << ID_PROXIMITY)
+-#define  SENSORS_LIGHT           (1 << ID_LIGHT)
+-#define  SENSORS_PRESSURE        (1 << ID_PRESSURE)
+-#define  SENSORS_HUMIDITY        (1 << ID_HUMIDITY)
++#define  ID_BASE                        SENSORS_HANDLE_BASE
++#define  ID_ACCELERATION                (ID_BASE+0)
++#define  ID_GYROSCOPE                   (ID_BASE+1)
++#define  ID_MAGNETIC_FIELD              (ID_BASE+2)
++#define  ID_ORIENTATION                 (ID_BASE+3)
++#define  ID_TEMPERATURE                 (ID_BASE+4)
++#define  ID_PROXIMITY                   (ID_BASE+5)
++#define  ID_LIGHT                       (ID_BASE+6)
++#define  ID_PRESSURE                    (ID_BASE+7)
++#define  ID_HUMIDITY                    (ID_BASE+8)
++#define  ID_MAGNETIC_FIELD_UNCALIBRATED (ID_BASE+9)
++
++#define  SENSORS_ACCELERATION                 (1 << ID_ACCELERATION)
++#define  SENSORS_GYROSCOPE                    (1 << ID_GYROSCOPE)
++#define  SENSORS_MAGNETIC_FIELD               (1 << ID_MAGNETIC_FIELD)
++#define  SENSORS_ORIENTATION                  (1 << ID_ORIENTATION)
++#define  SENSORS_TEMPERATURE                  (1 << ID_TEMPERATURE)
++#define  SENSORS_PROXIMITY                    (1 << ID_PROXIMITY)
++#define  SENSORS_LIGHT                        (1 << ID_LIGHT)
++#define  SENSORS_PRESSURE                     (1 << ID_PRESSURE)
++#define  SENSORS_HUMIDITY                     (1 << ID_HUMIDITY)
++#define  SENSORS_MAGNETIC_FIELD_UNCALIBRATED  (1 << ID_MAGNETIC_FIELD)
+ 
+ #define  ID_CHECK(x)  ((unsigned)((x) - ID_BASE) < MAX_NUM_SENSORS)
+ 
+ #define  SENSORS_LIST  \
+     SENSOR_(ACCELERATION,"acceleration") \
++    SENSOR_(GYROSCOPE,"gyroscope") \
+     SENSOR_(MAGNETIC_FIELD,"magnetic-field") \
+     SENSOR_(ORIENTATION,"orientation") \
+     SENSOR_(TEMPERATURE,"temperature") \
+     SENSOR_(PROXIMITY,"proximity") \
+     SENSOR_(LIGHT, "light") \
+     SENSOR_(PRESSURE, "pressure") \
+-    SENSOR_(HUMIDITY, "humidity")
++    SENSOR_(HUMIDITY, "humidity") \
++    SENSOR_(MAGNETIC_FIELD_UNCALIBRATED,"magnetic-field-uncalibrated") \
+ 
+ static const struct {
+     const char*  name;
+@@ -317,6 +323,18 @@ static int sensor_device_poll_event_locked(SensorDevice* dev)
+             continue;
+         }
+ 
++        /* "gyroscope:<x>:<y>:<z>" corresponds to a gyroscope event */
++        if (sscanf(buff, "gyroscope:%g:%g:%g", params+0, params+1, params+2)
++                == 3) {
++            new_sensors |= SENSORS_GYROSCOPE;
++            if (events[ID_GYROSCOPE].type == SENSOR_TYPE_META_DATA) continue;
++            events[ID_GYROSCOPE].gyro.x = params[0];
++            events[ID_GYROSCOPE].gyro.y = params[1];
++            events[ID_GYROSCOPE].gyro.z = params[2];
++            events[ID_GYROSCOPE].type = SENSOR_TYPE_GYROSCOPE;
++            continue;
++        }
++
+         /* "orientation:<azimuth>:<pitch>:<roll>" is sent when orientation
+          * changes */
+         if (sscanf(buff, "orientation:%g:%g:%g", params+0, params+1, params+2)
+@@ -347,6 +365,19 @@ static int sensor_device_poll_event_locked(SensorDevice* dev)
+             continue;
+         }
+ 
++        if (sscanf(buff, "magnetic-uncalibrated:%g:%g:%g", params+0, params+1, params+2)
++                == 3) {
++            new_sensors |= SENSORS_MAGNETIC_FIELD_UNCALIBRATED;
++            if (events[ID_MAGNETIC_FIELD_UNCALIBRATED].type == SENSOR_TYPE_META_DATA) continue;
++            events[ID_MAGNETIC_FIELD_UNCALIBRATED].magnetic.x = params[0];
++            events[ID_MAGNETIC_FIELD_UNCALIBRATED].magnetic.y = params[1];
++            events[ID_MAGNETIC_FIELD_UNCALIBRATED].magnetic.z = params[2];
++            events[ID_MAGNETIC_FIELD_UNCALIBRATED].magnetic.status =
++                    SENSOR_STATUS_ACCURACY_HIGH;
++            events[ID_MAGNETIC_FIELD_UNCALIBRATED].type = SENSOR_TYPE_MAGNETIC_FIELD_UNCALIBRATED;
++            continue;
++        }
++
+         /* "temperature:<celsius>" */
+         if (sscanf(buff, "temperature:%g", params+0) == 1) {
+             new_sensors |= SENSORS_TEMPERATURE;
+@@ -656,6 +687,19 @@ static const struct sensor_t sSensorListInit[] = {
+           .reserved   = {}
+         },
+ 
++        { .name       = "Goldfish 3-axis Gyroscope",
++          .vendor     = "The Android Open Source Project",
++          .version    = 1,
++          .handle     = ID_GYROSCOPE,
++          .type       = SENSOR_TYPE_GYROSCOPE,
++          .maxRange   = 11.1111111,
++          .resolution = 1.0f/1000.0f,
++          .power      = 3.0f,
++          .minDelay   = 10000,
++          .maxDelay   = 60 * 1000 * 1000,
++          .reserved   = {}
++        },
++
+         { .name       = "Goldfish 3-axis Magnetic field sensor",
+           .vendor     = "The Android Open Source Project",
+           .version    = 1,
+@@ -780,7 +824,20 @@ static const struct sensor_t sSensorListInit[] = {
+           .requiredPermission = 0,
+           .flags = SENSOR_FLAG_CONTINUOUS_MODE,
+           .reserved   = {}
+-        }
++        },
++
++        { .name       = "Goldfish 3-axis Magnetic field sensor (uncalibrated)",
++          .vendor     = "The Android Open Source Project",
++          .version    = 1,
++          .handle     = ID_MAGNETIC_FIELD_UNCALIBRATED,
++          .type       = SENSOR_TYPE_MAGNETIC_FIELD_UNCALIBRATED,
++          .maxRange   = 2000.0f,
++          .resolution = 1.0f,
++          .power      = 6.7f,
++          .minDelay   = 10000,
++          .maxDelay   = 60 * 1000 * 1000,
++          .reserved   = {}
++        },
+ };
+ 
+ static struct sensor_t  sSensorList[MAX_NUM_SENSORS];
+diff --git a/tools/mk_qemu_image.sh b/tools/mk_qemu_image.sh
+new file mode 100755
+index 0000000..ec3ba43
+--- /dev/null
++++ b/tools/mk_qemu_image.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++
++set -e
++
++if [ "$#" -ne 1 ]; then
++    echo "$0 path-to-system.img | path-to-vendor.img" >&2
++    exit 1
++fi
++
++srcimg=$1
++base_srcimg=`basename $srcimg`
++label="${base_srcimg%.*}"
++dir_name=$(dirname $srcimg)
++target=${dir_name}/$label-qemu.img
++
++dd if=/dev/zero of=$target ibs=1024k count=1
++dd if=$srcimg of=$target conv=notrunc,sync ibs=1024k obs=1024k seek=1
++unamestr=`uname`
++if [[ "$unamestr" == 'Linux' ]]; then
++curdisksize=$(stat -c %s $target)
++elif [[ "$unamestr" == 'Darwin' ]]; then
++curdisksize=$(stat -f %z $target)
++else
++echo "Cannot determine OS type, quit"
++exit 1
++fi
++
++dd if=/dev/zero of=$target conv=notrunc bs=1 count=1024k seek=$curdisksize
++
++disksize=`expr $curdisksize + 1024 \* 1024 `
++
++end=`expr $disksize \/ 512 - 2048 - 1`
++${SGDISK:-sgdisk} --clear $target
++${SGDISK:-sgdisk} --new=1:2048:$end --type=1:8300 --change-name=1:$label $target
+diff --git a/vndk/Android.mk b/vndk/Android.mk
+new file mode 100644
+index 0000000..a58aac5
+--- /dev/null
++++ b/vndk/Android.mk
+@@ -0,0 +1,58 @@
++ifneq ($(filter generic_x86 generic_x86_64 generic generic_arm64 generic_mips generic_mips64, $(TARGET_DEVICE)),)
++
++LOCAL_PATH := $(call my-dir)
++
++VNDK_SP_LIBRARIES := \
++    android.hardware.renderscript@1.0\
++    android.hardware.graphics.allocator@2.0\
++    android.hardware.graphics.mapper@2.0\
++    android.hardware.graphics.common@1.0\
++    libhwbinder\
++    libbase\
++    libcutils\
++    libhardware\
++    libhidlbase\
++    libhidltransport\
++    libutils\
++    libc++\
++    libRS_internal\
++    libRSDriver\
++    libRSCpuRef\
++    libbcinfo\
++    libblas\
++    libft2\
++    libpng\
++    libcompiler_rt\
++    libbacktrace\
++    libunwind\
++    libunwindstack\
++    liblzma\
++
++define add-vndk-sp-lib
++include $$(CLEAR_VARS)
++LOCAL_MODULE := $1.vndk-sp
++LOCAL_MODULE_CLASS := SHARED_LIBRARIES
++LOCAL_PREBUILT_MODULE_FILE := $$(TARGET_OUT)/lib/$1.so
++LOCAL_MULTILIB := 32
++LOCAL_MODULE_TAGS := optional
++LOCAL_INSTALLED_MODULE_STEM := $1.so
++LOCAL_MODULE_SUFFIX := .so
++LOCAL_MODULE_RELATIVE_PATH := vndk-sp
++include $$(BUILD_PREBUILT)
++
++include $$(CLEAR_VARS)
++LOCAL_MODULE := $1.vndk-sp
++LOCAL_MODULE_CLASS := SHARED_LIBRARIES
++LOCAL_PREBUILT_MODULE_FILE := $$(TARGET_OUT)/lib64/$1.so
++LOCAL_MULTILIB := 64
++LOCAL_MODULE_TAGS := optional
++LOCAL_INSTALLED_MODULE_STEM := $1.so
++LOCAL_MODULE_SUFFIX := .so
++LOCAL_MODULE_RELATIVE_PATH := vndk-sp
++include $$(BUILD_PREBUILT)
++endef
++
++$(foreach lib,$(VNDK_SP_LIBRARIES),\
++    $(eval $(call add-vndk-sp-lib,$(lib))))
++
++endif

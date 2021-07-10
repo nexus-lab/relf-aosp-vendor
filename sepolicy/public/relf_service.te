@@ -1,0 +1,8 @@
+type relf, domain;
+type relf_exec, exec_type, file_type;
+
+binder_use(relf)
+binder_service(relf)
+add_service(relf, relf_service)
+
+binder_call(relf, priv_app)

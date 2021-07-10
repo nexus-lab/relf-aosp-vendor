@@ -1,0 +1,1039 @@
+diff --git a/core/Makefile b/core/Makefile
+index 317e6e8..489f1be 100644
+--- a/core/Makefile
++++ b/core/Makefile
+@@ -2704,6 +2704,27 @@ endif # TARGET_BUILD_APPS
+ .PHONY: dalvikfiles
+ dalvikfiles: $(INTERNAL_DALVIK_MODULES)
+ 
++ifeq ($(BUILD_QEMU_IMAGES),true)
++INSTALLED_QEMU_SYSTEMIMAGE := $(PRODUCT_OUT)/system-qemu.img
++MK_QEMU_IMAGE_SH := device/generic/goldfish/tools/mk_qemu_image.sh
++SGDISK_HOST := $(HOST_OUT_EXECUTABLES)/sgdisk
++$(INSTALLED_QEMU_SYSTEMIMAGE): $(INSTALLED_SYSTEMIMAGE) $(MK_QEMU_IMAGE_SH) $(SGDISK_HOST)
++	@echo Create system-qemu.img
++	(export SGDISK=$(SGDISK_HOST); $(MK_QEMU_IMAGE_SH) ${PRODUCT_OUT}/system.img)
++
++systemimage: $(INSTALLED_QEMU_SYSTEMIMAGE)
++droidcore: $(INSTALLED_QEMU_SYSTEMIMAGE)
++ifeq ($(BOARD_USES_VENDORIMAGE),true)
++INSTALLED_QEMU_VENDORIMAGE := $(PRODUCT_OUT)/vendor-qemu.img
++$(INSTALLED_QEMU_VENDORIMAGE): $(INSTALLED_VENDORIMAGE_TARGET) $(MK_QEMU_IMAGE_SH) $(SGDISK_HOST)
++	@echo Create vendor-qemu.img
++	(export SGDISK=$(SGDISK_HOST); $(MK_QEMU_IMAGE_SH) ${PRODUCT_OUT}/vendor.img)
++
++vendorimage: $(INSTALLED_QEMU_VENDORIMAGE)
++droidcore: $(INSTALLED_QEMU_VENDORIMAGE)
++endif
++endif
++
+ # -----------------------------------------------------------------
+ # The emulator package
+ ifeq ($(BUILD_EMULATOR),true)
+@@ -2799,6 +2820,7 @@ deps := \
+ 	$(SYMBOLS_ZIP) \
+ 	$(COVERAGE_ZIP) \
+ 	$(INSTALLED_SYSTEMIMAGE) \
++	$(INSTALLED_QEMU_SYSTEMIMAGE) \
+ 	$(INSTALLED_USERDATAIMAGE_TARGET) \
+ 	$(INSTALLED_RAMDISK_TARGET) \
+ 	$(INSTALLED_SDK_BUILD_PROP_TARGET) \
+diff --git a/core/main.mk b/core/main.mk
+index 8461e62..a6b2376 100644
+--- a/core/main.mk
++++ b/core/main.mk
+@@ -860,6 +860,8 @@ ifdef is_sdk_build
+                       $(TARGET_OUT_DATA)/%, \
+                               $(sort $(call get-tagged-modules,gnu)))
+   target_gnu_MODULES := $(filter-out $(TARGET_OUT_EXECUTABLES)/%,$(target_gnu_MODULES))
++  target_gnu_MODULES := $(filter-out %/libopenjdkjvmti.so,$(target_gnu_MODULES))
++  target_gnu_MODULES := $(filter-out %/libopenjdkjvmtid.so,$(target_gnu_MODULES))
+   $(info Removing from sdk:)$(foreach d,$(target_gnu_MODULES),$(info : $(d)))
+   modules_to_install := \
+               $(filter-out $(target_gnu_MODULES),$(modules_to_install))
+diff --git a/core/tasks/sdk-addon.mk b/core/tasks/sdk-addon.mk
+index 362b229..9aa1c83 100644
+--- a/core/tasks/sdk-addon.mk
++++ b/core/tasks/sdk-addon.mk
+@@ -63,7 +63,8 @@ endif
+ 
+ # Files copied in the system-image directory
+ files_to_copy += \
+-	$(addon_dir_img):$(BUILT_SYSTEMIMAGE):images/$(TARGET_CPU_ABI)/system.img \
++	$(addon_dir_img):$(INSTALLED_QEMU_SYSTEMIMAGE):images/$(TARGET_CPU_ABI)/system.img \
++	$(addon_dir_img):$(INSTALLED_QEMU_VENDORIMAGE):images/$(TARGET_CPU_ABI)/vendor.img \
+ 	$(addon_dir_img):$(BUILT_USERDATAIMAGE_TARGET):images/$(TARGET_CPU_ABI)/userdata.img \
+ 	$(addon_dir_img):$(BUILT_RAMDISK_TARGET):images/$(TARGET_CPU_ABI)/ramdisk.img \
+ 	$(addon_dir_img):$(PRODUCT_OUT)/system/build.prop:images/$(TARGET_CPU_ABI)/build.prop \
+@@ -114,9 +115,10 @@ $(full_target): $(sdk_addon_deps) | $(ACP)
+ 	$(hide) ( F=$$(pwd)/$@ ; cd $(PRIVATE_STAGING_DIR)/.. && zip -rqX $$F $(notdir $(PRIVATE_STAGING_DIR)) )
+ 
+ $(full_target_img): PRIVATE_STAGING_DIR := $(call append-path,$(staging),$(addon_dir_img))/images/$(TARGET_CPU_ABI)
+-$(full_target_img): $(full_target) $(addon_img_source_prop)
++$(full_target_img): $(full_target) $(addon_img_source_prop) | $(ACP)
+ 	@echo Packaging SDK Addon System-Image: $@
+ 	$(hide) mkdir -p $(dir $@)
++	$(ACP) -r $(PRODUCT_OUT)/data $(PRIVATE_STAGING_DIR)/data
+ 	$(hide) ( F=$$(pwd)/$@ ; cd $(PRIVATE_STAGING_DIR)/.. && zip -rqX $$F $(notdir $(PRIVATE_STAGING_DIR)) )
+ 
+ 
+diff --git a/target/board/generic/BoardConfig.mk b/target/board/generic/BoardConfig.mk
+index 946e480..86b7904 100644
+--- a/target/board/generic/BoardConfig.mk
++++ b/target/board/generic/BoardConfig.mk
+@@ -43,6 +43,7 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+ 
+ # Build OpenGLES emulation guest and host libraries
+ BUILD_EMULATOR_OPENGL := true
++BUILD_QEMU_IMAGES := true
+ 
+ # Build and enable the OpenGL ES View renderer. When running on the emulator,
+ # the GLES renderer disables itself if host GL acceleration isn't available.
+@@ -51,10 +52,16 @@ USE_OPENGL_RENDERER := true
+ TARGET_USERIMAGES_USE_EXT4 := true
+ BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2147483648  # 2 GB
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 576716800
++TARGET_COPY_OUT_VENDOR := vendor
++# ~100 MB vendor image. Please adjust system image / vendor image sizes
++# when finalizing them.
++BOARD_VENDORIMAGE_PARTITION_SIZE := 100000000
++BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 69206016
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_FLASH_BLOCK_SIZE := 512
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
++DEVICE_MATRIX_FILE := device/generic/goldfish/compatibility_matrix.xml
+ 
+ BOARD_SEPOLICY_DIRS += build/target/board/generic/sepolicy
+-
++BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
+diff --git a/target/board/generic/device.mk b/target/board/generic/device.mk
+index e56a4d1..e18c165 100644
+--- a/target/board/generic/device.mk
++++ b/target/board/generic/device.mk
+@@ -19,8 +19,7 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     device/generic/goldfish/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+diff --git a/target/board/generic/sepolicy/adbd.te b/target/board/generic/sepolicy/adbd.te
+new file mode 100644
+index 0000000..9546c1a
+--- /dev/null
++++ b/target/board/generic/sepolicy/adbd.te
+@@ -0,0 +1 @@
++set_prop(adbd, ctl_mdnsd_prop);
+diff --git a/target/board/generic/sepolicy/audioserver.te b/target/board/generic/sepolicy/audioserver.te
+new file mode 100644
+index 0000000..c3c4a3a
+--- /dev/null
++++ b/target/board/generic/sepolicy/audioserver.te
+@@ -0,0 +1 @@
++allow audioserver bootanim:binder call;
+diff --git a/target/board/generic/sepolicy/bootanim.te b/target/board/generic/sepolicy/bootanim.te
+index b4b1eef..4be1c8a 100644
+--- a/target/board/generic/sepolicy/bootanim.te
++++ b/target/board/generic/sepolicy/bootanim.te
+@@ -1,4 +1,5 @@
+ allow bootanim self:process execmem;
+ allow bootanim ashmem_device:chr_file execute;
+-
++#TODO: This can safely be ignored until b/62954877 is fixed
++dontaudit bootanim system_data_file:dir read;
+ set_prop(bootanim, qemu_prop)
+diff --git a/target/board/generic/sepolicy/cameraserver.te b/target/board/generic/sepolicy/cameraserver.te
+new file mode 100644
+index 0000000..6cf5d6a
+--- /dev/null
++++ b/target/board/generic/sepolicy/cameraserver.te
+@@ -0,0 +1,2 @@
++allow cameraserver system_file:dir { open read };
++allow cameraserver hal_allocator:fd use;
+diff --git a/target/board/generic/sepolicy/file.te b/target/board/generic/sepolicy/file.te
+index 9227f80..f4ae9e4 100644
+--- a/target/board/generic/sepolicy/file.te
++++ b/target/board/generic/sepolicy/file.te
+@@ -1,2 +1 @@
+-type qemud_socket, file_type;
+ type sysfs_writable, fs_type, sysfs_type, mlstrustedobject;
+diff --git a/target/board/generic/sepolicy/file_contexts b/target/board/generic/sepolicy/file_contexts
+index d1a1e8c..f550f4d 100644
+--- a/target/board/generic/sepolicy/file_contexts
++++ b/target/board/generic/sepolicy/file_contexts
+@@ -7,16 +7,29 @@
+ /dev/block/vda               u:object_r:system_block_device:s0
+ /dev/block/vdb               u:object_r:cache_block_device:s0
+ /dev/block/vdc               u:object_r:userdata_block_device:s0
++/dev/block/vdd               u:object_r:metadata_block_device:s0
++/dev/block/vde               u:object_r:system_block_device:s0
+ 
+ /dev/goldfish_pipe           u:object_r:qemu_device:s0
+ /dev/goldfish_sync           u:object_r:qemu_device:s0
+ /dev/qemu_.*                 u:object_r:qemu_device:s0
+-/dev/socket/qemud            u:object_r:qemud_socket:s0
+ /dev/ttyGF[0-9]*             u:object_r:serial_device:s0
+ /dev/ttyS2                   u:object_r:console_device:s0
+-/system/bin/qemud            u:object_r:qemud_exec:s0
+ /sys/qemu_trace(/.*)?        u:object_r:sysfs_writable:s0
+-/system/etc/init.goldfish.sh u:object_r:goldfish_setup_exec:s0
+-/system/vendor/bin/init.ranchu-core.sh u:object_r:goldfish_setup_exec:s0
+-/system/vendor/bin/init.ranchu-net.sh u:object_r:goldfish_setup_exec:s0
+-/system/bin/qemu-props       u:object_r:qemu_props_exec:s0
++/vendor/bin/init\.ranchu-core\.sh u:object_r:goldfish_setup_exec:s0
++/vendor/bin/init\.ranchu-net\.sh u:object_r:goldfish_setup_exec:s0
++/vendor/bin/qemu-props       u:object_r:qemu_props_exec:s0
++
++/vendor/bin/hw/android\.hardware\.drm@1\.0-service\.widevine          u:object_r:hal_drm_widevine_exec:s0
++
++/vendor/lib(64)?/hw/gralloc\.ranchu\.so   u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libEGL_emulation\.so          u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libGLESv1_CM_emulation\.so    u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libGLESv2_emulation\.so       u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libEGL_swiftshader\.so          u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libGLESv1_CM_swiftshader\.so    u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libGLESv2_swiftshader\.so       u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libOpenglSystemCommon\.so       u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/lib_renderControl_enc\.so       u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libGLESv1_enc\.so       u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libGLESv2_enc\.so       u:object_r:same_process_hal_file:s0
+diff --git a/target/board/generic/sepolicy/goldfish_setup.te b/target/board/generic/sepolicy/goldfish_setup.te
+index 78d20fc..bcd49bd 100644
+--- a/target/board/generic/sepolicy/goldfish_setup.te
++++ b/target/board/generic/sepolicy/goldfish_setup.te
+@@ -1,29 +1,12 @@
+ # goldfish-setup service: runs init.goldfish.sh script
+ type goldfish_setup, domain;
+-type goldfish_setup_exec, exec_type, file_type;
++type goldfish_setup_exec, vendor_file_type, exec_type, file_type;
+ 
+ init_daemon_domain(goldfish_setup)
+ 
+-# Inherit open file to shell (interpreter) for script.
+-allow goldfish_setup shell_exec:file rx_file_perms;
+-
+-# Run ifconfig, route commands to configure interfaces and routes.
+-allow goldfish_setup system_file:file execute_no_trans;
+-allow goldfish_setup toolbox_exec:file rx_file_perms;
+ allow goldfish_setup self:capability { net_admin net_raw };
+-allow goldfish_setup self:udp_socket create_socket_perms;
++allow goldfish_setup self:udp_socket { create ioctl };
++allow goldfish_setup vendor_toolbox_exec:file execute_no_trans;
+ allowxperm goldfish_setup self:udp_socket ioctl priv_sock_ioctls;
+-
+-wakelock_use(goldfish_setup)
+-net_domain(goldfish_setup)
+-
+-# Set net.eth0.dns*, debug.sf.nobootanimation
+-set_prop(goldfish_setup, system_prop)
+-set_prop(goldfish_setup, debug_prop)
+-
+-# Set ro.radio.noril
+-set_prop(goldfish_setup, radio_noril_prop)
+-
+-# Stop ril-daemon service (by setting ctl.stop to ril-daemon, which
+-# transforms to a permission check on ctl.ril-daemon).
+-set_prop(goldfish_setup, ctl_rildaemon_prop)
++wakelock_use(goldfish_setup);
++allow goldfish_setup vendor_shell_exec:file { rx_file_perms };
+diff --git a/target/board/generic/sepolicy/hal_camera_default.te b/target/board/generic/sepolicy/hal_camera_default.te
+new file mode 100644
+index 0000000..eb88c36
+--- /dev/null
++++ b/target/board/generic/sepolicy/hal_camera_default.te
+@@ -0,0 +1,3 @@
++vndbinder_use(hal_camera_default);
++allow hal_camera_default hal_graphics_mapper_hwservice:hwservice_manager find;
++hal_client_domain(hal_camera_default, hal_graphics_composer)
+diff --git a/target/board/generic/sepolicy/hal_drm_default.te b/target/board/generic/sepolicy/hal_drm_default.te
+new file mode 100644
+index 0000000..5a07433
+--- /dev/null
++++ b/target/board/generic/sepolicy/hal_drm_default.te
+@@ -0,0 +1,2 @@
++vndbinder_use(hal_drm_default);
++hal_client_domain(hal_drm_default, hal_graphics_composer)
+diff --git a/target/board/generic/sepolicy/hal_drm_widevine.te b/target/board/generic/sepolicy/hal_drm_widevine.te
+new file mode 100644
+index 0000000..42d462a
+--- /dev/null
++++ b/target/board/generic/sepolicy/hal_drm_widevine.te
+@@ -0,0 +1,12 @@
++# define SELinux domain
++type hal_drm_widevine, domain;
++hal_server_domain(hal_drm_widevine, hal_drm)
++
++type hal_drm_widevine_exec, exec_type, vendor_file_type, file_type;
++init_daemon_domain(hal_drm_widevine)
++
++allow hal_drm mediacodec:fd use;
++allow hal_drm { appdomain -isolated_app }:fd use;
++
++vndbinder_use(hal_drm_widevine);
++hal_client_domain(hal_drm_widevine, hal_graphics_composer);
+diff --git a/target/board/generic/sepolicy/hal_gnss_default.te b/target/board/generic/sepolicy/hal_gnss_default.te
+index 0dd3d03..537af2c 100644
+--- a/target/board/generic/sepolicy/hal_gnss_default.te
++++ b/target/board/generic/sepolicy/hal_gnss_default.te
+@@ -1,3 +1,3 @@
+ #============= hal_gnss_default ==============
+-allow hal_gnss_default vndbinder_device:chr_file { ioctl open read write };
++vndbinder_use(hal_gnss_default);
+ 
+diff --git a/target/board/generic/sepolicy/hal_graphics_composer_default.te b/target/board/generic/sepolicy/hal_graphics_composer_default.te
+index 034bdef..08b8ad5 100644
+--- a/target/board/generic/sepolicy/hal_graphics_composer_default.te
++++ b/target/board/generic/sepolicy/hal_graphics_composer_default.te
+@@ -1,3 +1,3 @@
+ #============= hal_graphics_composer_default ==============
+-allow hal_graphics_composer_default vndbinder_device:chr_file { ioctl open read write };
++vndbinder_use(hal_graphics_composer_default);
+ 
+diff --git a/target/board/generic/sepolicy/init.te b/target/board/generic/sepolicy/init.te
+index 3aa81d1..84a4e8d 100644
+--- a/target/board/generic/sepolicy/init.te
++++ b/target/board/generic/sepolicy/init.te
+@@ -1 +1,2 @@
+ allow init tmpfs:lnk_file create_file_perms;
++dontaudit init kernel:system module_request;
+diff --git a/target/board/generic/sepolicy/mediacodec.te b/target/board/generic/sepolicy/mediacodec.te
+new file mode 100644
+index 0000000..acf4e59
+--- /dev/null
++++ b/target/board/generic/sepolicy/mediacodec.te
+@@ -0,0 +1 @@
++allow mediacodec system_file:dir { open read };
+diff --git a/target/board/generic/sepolicy/netd.te b/target/board/generic/sepolicy/netd.te
+index 2b002ec..09a28b9 100644
+--- a/target/board/generic/sepolicy/netd.te
++++ b/target/board/generic/sepolicy/netd.te
+@@ -1 +1,3 @@
+ dontaudit netd self:capability sys_module;
++#TODO: This can safely be ignored until b/62954877 is fixed
++dontaudit netd kernel:system module_request;
+diff --git a/target/board/generic/sepolicy/priv_app.te b/target/board/generic/sepolicy/priv_app.te
+new file mode 100644
+index 0000000..3d16f32
+--- /dev/null
++++ b/target/board/generic/sepolicy/priv_app.te
+@@ -0,0 +1,5 @@
++#TODO: b/62908025
++dontaudit priv_app firstboot_prop:file { getattr open };
++dontaudit priv_app device:dir { open read };
++dontaudit priv_app proc_interrupts:file { getattr open read };
++dontaudit priv_app proc_modules:file { getattr open read };
+diff --git a/target/board/generic/sepolicy/qemu_props.te b/target/board/generic/sepolicy/qemu_props.te
+index d5571fd..0f5ec8c 100644
+--- a/target/board/generic/sepolicy/qemu_props.te
++++ b/target/board/generic/sepolicy/qemu_props.te
+@@ -1,12 +1,9 @@
+ # qemu-props service:  Sets system properties on boot.
+ type qemu_props, domain;
+-type qemu_props_exec, exec_type, file_type;
++type qemu_props_exec, vendor_file_type, exec_type, file_type;
+ 
+ init_daemon_domain(qemu_props)
+ 
+-# Set properties.
+ set_prop(qemu_props, qemu_prop)
+ set_prop(qemu_props, dalvik_prop)
+-set_prop(qemu_props, config_prop)
+-set_prop(qemu_props, opengles_prop)
+ set_prop(qemu_props, qemu_cmdline)
+diff --git a/target/board/generic/sepolicy/qemud.te b/target/board/generic/sepolicy/qemud.te
+deleted file mode 100644
+index eee21c4..0000000
+--- a/target/board/generic/sepolicy/qemud.te
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# qemu support daemon
+-type qemud, domain;
+-type qemud_exec, exec_type, file_type;
+-
+-init_daemon_domain(qemud)
+-
+-# Access /dev/ttyS1 and /dev/ttyGF1.
+-allow qemud serial_device:chr_file rw_file_perms;
+diff --git a/target/board/generic/sepolicy/rild.te b/target/board/generic/sepolicy/rild.te
+deleted file mode 100644
+index e148b6c..0000000
+--- a/target/board/generic/sepolicy/rild.te
++++ /dev/null
+@@ -1 +0,0 @@
+-unix_socket_connect(rild, qemud, qemud)
+diff --git a/target/board/generic/sepolicy/system_server.te b/target/board/generic/sepolicy/system_server.te
+index f9e277b..9063095 100644
+--- a/target/board/generic/sepolicy/system_server.te
++++ b/target/board/generic/sepolicy/system_server.te
+@@ -1,3 +1,2 @@
+-unix_socket_connect(system_server, qemud, qemud)
+ get_prop(system_server, opengles_prop)
+ get_prop(system_server, radio_noril_prop)
+diff --git a/target/board/generic/sepolicy/vold.te b/target/board/generic/sepolicy/vold.te
+new file mode 100644
+index 0000000..5f3bdd4
+--- /dev/null
++++ b/target/board/generic/sepolicy/vold.te
+@@ -0,0 +1 @@
++dontaudit vold kernel:system module_request;
+diff --git a/target/board/generic/sepolicy/zygote.te b/target/board/generic/sepolicy/zygote.te
+index a90f02b..e97d895 100644
+--- a/target/board/generic/sepolicy/zygote.te
++++ b/target/board/generic/sepolicy/zygote.te
+@@ -1 +1,4 @@
+ set_prop(zygote, qemu_prop)
++# TODO (b/63631799) fix this access
++# Suppress denials to storage. Webview zygote should not be accessing.
++dontaudit webview_zygote mnt_expand_file:dir getattr;
+diff --git a/target/board/generic/system.prop b/target/board/generic/system.prop
+index f2424c9..ad8e5b8 100644
+--- a/target/board/generic/system.prop
++++ b/target/board/generic/system.prop
+@@ -2,5 +2,4 @@
+ # system.prop for generic sdk 
+ #
+ 
+-rild.libpath=/system/lib/libreference-ril.so
+-rild.libargs=-d /dev/ttyS0
++rild.libpath=/vendor/lib/libreference-ril.so
+diff --git a/target/board/generic_arm64/BoardConfig.mk b/target/board/generic_arm64/BoardConfig.mk
+index 5917425..a7a8943 100644
+--- a/target/board/generic_arm64/BoardConfig.mk
++++ b/target/board/generic_arm64/BoardConfig.mk
+@@ -74,6 +74,7 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+ 
+ # Build OpenGLES emulation host and guest libraries
+ BUILD_EMULATOR_OPENGL := true
++BUILD_QEMU_IMAGES := true
+ 
+ # Build and enable the OpenGL ES View renderer. When running on the emulator,
+ # the GLES renderer disables itself if host GL acceleration isn't available.
+@@ -82,9 +83,16 @@ USE_OPENGL_RENDERER := true
+ TARGET_USERIMAGES_USE_EXT4 := true
+ BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2684354560  # 2.5 GB
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 576716800
++TARGET_COPY_OUT_VENDOR := vendor
++# ~100 MB vendor image. Please adjust system image / vendor image sizes
++# when finalizing them.
++BOARD_VENDORIMAGE_PARTITION_SIZE := 100000000
++BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 69206016
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_FLASH_BLOCK_SIZE := 512
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
++DEVICE_MATRIX_FILE   := device/generic/goldfish/compatibility_matrix.xml
+ 
++BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
+ BOARD_SEPOLICY_DIRS += build/target/board/generic/sepolicy
+diff --git a/target/board/generic_arm64/device.mk b/target/board/generic_arm64/device.mk
+index 9647a4e..ca287eb 100644
+--- a/target/board/generic_arm64/device.mk
++++ b/target/board/generic_arm64/device.mk
+@@ -19,8 +19,7 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     device/generic/goldfish/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+diff --git a/target/board/generic_arm64/system.prop b/target/board/generic_arm64/system.prop
+index 24578a9..5b0183a 100644
+--- a/target/board/generic_arm64/system.prop
++++ b/target/board/generic_arm64/system.prop
+@@ -2,5 +2,4 @@
+ # system.prop for generic arm64 sdk
+ #
+ 
+-rild.libpath=/system/lib64/libreference-ril.so
+-rild.libargs=-d /dev/ttyS0
++rild.libpath=/vendor/lib64/libreference-ril.so
+diff --git a/target/board/generic_mips/BoardConfig.mk b/target/board/generic_mips/BoardConfig.mk
+index c36cc4a..a9e46b4 100644
+--- a/target/board/generic_mips/BoardConfig.mk
++++ b/target/board/generic_mips/BoardConfig.mk
+@@ -51,6 +51,7 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+ 
+ # Build OpenGLES emulation guest and host libraries
+ BUILD_EMULATOR_OPENGL := true
++BUILD_QEMU_IMAGES := true
+ 
+ # Build and enable the OpenGL ES View renderer. When running on the emulator,
+ # the GLES renderer disables itself if host GL acceleration isn't available.
+@@ -59,9 +60,15 @@ USE_OPENGL_RENDERER := true
+ TARGET_USERIMAGES_USE_EXT4 := true
+ BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2147483648  # 2 GB
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 734003200
++TARGET_COPY_OUT_VENDOR := vendor
++# ~100 MB vendor image. Please adjust system image / vendor image sizes
++# when finalizing them.
++BOARD_VENDORIMAGE_PARTITION_SIZE := 100000000
++BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 69206016
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_FLASH_BLOCK_SIZE := 512
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
++DEVICE_MATRIX_FILE   := device/generic/goldfish/compatibility_matrix.xml
+ 
+ BOARD_SEPOLICY_DIRS += build/target/board/generic/sepolicy
+diff --git a/target/board/generic_mips/device.mk b/target/board/generic_mips/device.mk
+index 06a7d8a..a2633e1 100644
+--- a/target/board/generic_mips/device.mk
++++ b/target/board/generic_mips/device.mk
+@@ -19,8 +19,7 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     device/generic/goldfish/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+diff --git a/target/board/generic_mips64/BoardConfig.mk b/target/board/generic_mips64/BoardConfig.mk
+index 4798e3f..6cb6c11 100644
+--- a/target/board/generic_mips64/BoardConfig.mk
++++ b/target/board/generic_mips64/BoardConfig.mk
+@@ -66,6 +66,7 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+ 
+ # Build OpenGLES emulation guest and host libraries
+ BUILD_EMULATOR_OPENGL := true
++BUILD_QEMU_IMAGES := true
+ 
+ # Build and enable the OpenGL ES View renderer. When running on the emulator,
+ # the GLES renderer disables itself if host GL acceleration isn't available.
+@@ -74,10 +75,16 @@ USE_OPENGL_RENDERER := true
+ TARGET_USERIMAGES_USE_EXT4 := true
+ BOARD_SYSTEMIMAGE_PARTITION_SIZE := 1879048192  # 1.75 GB
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 1610612736  # 1.5 GB, lots of space for running tests
++TARGET_COPY_OUT_VENDOR := vendor
++# ~100 MB vendor image. Please adjust system image / vendor image sizes
++# when finalizing them.
++BOARD_VENDORIMAGE_PARTITION_SIZE := 100000000
++BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 69206016
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_FLASH_BLOCK_SIZE := 512
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
++DEVICE_MATRIX_FILE   := device/generic/goldfish/compatibility_matrix.xml
+ 
+ BOARD_SEPOLICY_DIRS += build/target/board/generic/sepolicy
+ 
+diff --git a/target/board/generic_mips64/device.mk b/target/board/generic_mips64/device.mk
+index 66ec9db..2ccbcbd 100644
+--- a/target/board/generic_mips64/device.mk
++++ b/target/board/generic_mips64/device.mk
+@@ -19,8 +19,7 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     device/generic/goldfish/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+diff --git a/target/board/generic_mips64/system.prop b/target/board/generic_mips64/system.prop
+index aa03eae..4da69c0 100644
+--- a/target/board/generic_mips64/system.prop
++++ b/target/board/generic_mips64/system.prop
+@@ -2,5 +2,5 @@
+ # system.prop for generic mips64 sdk
+ #
+ 
+-rild.libpath=/system/lib64/libreference-ril.so
++rild.libpath=/vendor/lib64/libreference-ril.so
+ rild.libargs=-d /dev/ttyS0
+diff --git a/target/board/generic_x86/BoardConfig.mk b/target/board/generic_x86/BoardConfig.mk
+index 26b2944..bb2166b 100644
+--- a/target/board/generic_x86/BoardConfig.mk
++++ b/target/board/generic_x86/BoardConfig.mk
+@@ -31,17 +31,28 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+ # Build OpenGLES emulation host and guest libraries
+ BUILD_EMULATOR_OPENGL := true
+ 
++# Build partitioned system.img and vendor.img (if applicable)
++# for qemu, otherwise, init cannot find PART_NAME
++BUILD_QEMU_IMAGES := true
++
+ # Build and enable the OpenGL ES View renderer. When running on the emulator,
+ # the GLES renderer disables itself if host GL acceleration isn't available.
+ USE_OPENGL_RENDERER := true
+ 
+ TARGET_USERIMAGES_USE_EXT4 := true
+-BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2147483648
++BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2684354560
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 576716800
++TARGET_COPY_OUT_VENDOR := vendor
++BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
++# ~100 MB vendor image. Please adjust system image / vendor image sizes
++# when finalizing them.
++BOARD_VENDORIMAGE_PARTITION_SIZE := 100000000
++BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 69206016
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_FLASH_BLOCK_SIZE := 512
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
++DEVICE_MATRIX_FILE   := device/generic/goldfish/compatibility_matrix.xml
+ 
+ BOARD_SEPOLICY_DIRS += \
+         build/target/board/generic/sepolicy \
+diff --git a/target/board/generic_x86/device.mk b/target/board/generic_x86/device.mk
+index b5b0faf..24c39a5 100644
+--- a/target/board/generic_x86/device.mk
++++ b/target/board/generic_x86/device.mk
+@@ -19,8 +19,7 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     device/generic/goldfish/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+diff --git a/target/board/generic_x86/system.prop b/target/board/generic_x86/system.prop
+index 137a0f9..64829f3 100644
+--- a/target/board/generic_x86/system.prop
++++ b/target/board/generic_x86/system.prop
+@@ -2,5 +2,4 @@
+ # system.prop for generic sdk
+ #
+ 
+-rild.libpath=/system/lib/libreference-ril.so
+-rild.libargs=-d /dev/ttyS0
++rild.libpath=/vendor/lib/libreference-ril.so
+diff --git a/target/board/generic_x86_64/BoardConfig.mk b/target/board/generic_x86_64/BoardConfig.mk
+index 9b8e5c8..b49a10c 100755
+--- a/target/board/generic_x86_64/BoardConfig.mk
++++ b/target/board/generic_x86_64/BoardConfig.mk
+@@ -36,6 +36,7 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+ 
+ # Build OpenGLES emulation host and guest libraries
+ BUILD_EMULATOR_OPENGL := true
++BUILD_QEMU_IMAGES := true
+ 
+ # Build and enable the OpenGL ES View renderer. When running on the emulator,
+ # the GLES renderer disables itself if host GL acceleration isn't available.
+@@ -44,10 +45,17 @@ USE_OPENGL_RENDERER := true
+ TARGET_USERIMAGES_USE_EXT4 := true
+ BOARD_SYSTEMIMAGE_PARTITION_SIZE := 2684354560 # 2.5 GB
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 576716800
++TARGET_COPY_OUT_VENDOR := vendor
++# ~100 MB vendor image. Please adjust system image / vendor image sizes
++# when finalizing them.
++BOARD_VENDORIMAGE_PARTITION_SIZE := 100000000
++BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 69206016
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_FLASH_BLOCK_SIZE := 512
+ TARGET_USERIMAGES_SPARSE_EXT_DISABLED := true
++BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
++DEVICE_MATRIX_FILE   := device/generic/goldfish/compatibility_matrix.xml
+ 
+ BOARD_SEPOLICY_DIRS += \
+         build/target/board/generic/sepolicy \
+diff --git a/target/board/generic_x86_64/device.mk b/target/board/generic_x86_64/device.mk
+index b5b0faf..24c39a5 100755
+--- a/target/board/generic_x86_64/device.mk
++++ b/target/board/generic_x86_64/device.mk
+@@ -19,8 +19,7 @@
+ 
+ PRODUCT_PROPERTY_OVERRIDES := \
+     ro.ril.hsxpa=1 \
+-    ro.ril.gprsclass=10 \
+-    ro.adb.qemud=1
++    ro.ril.gprsclass=10
+ 
+ PRODUCT_COPY_FILES := \
+     device/generic/goldfish/data/etc/apns-conf.xml:system/etc/apns-conf.xml \
+diff --git a/target/board/generic_x86_64/system.prop b/target/board/generic_x86_64/system.prop
+index 43d4a88..ed9d173 100644
+--- a/target/board/generic_x86_64/system.prop
++++ b/target/board/generic_x86_64/system.prop
+@@ -2,5 +2,4 @@
+ # system.prop for generic sdk
+ #
+ 
+-rild.libpath=/system/lib64/libreference-ril.so
+-rild.libargs=-d /dev/ttyS0
++rild.libpath=/vendor/lib64/libreference-ril.so
+diff --git a/target/product/aosp_arm.mk b/target/product/aosp_arm.mk
+index 781cae6..9ed5284 100644
+--- a/target/product/aosp_arm.mk
++++ b/target/product/aosp_arm.mk
+@@ -1,5 +1,5 @@
+ #
+-# Copyright 2013 The Android Open-Source Project
++# Copyright 2017 The Android Open-Source Project
+ #
+ # Licensed under the Apache License, Version 2.0 (the "License");
+ # you may not use this file except in compliance with the License.
+@@ -13,6 +13,19 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ #
++
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib/libreference-ril.so
++
++# Note: the following lines need to stay at the beginning so that it can
++# take priority  and override the rules it inherit from other mk files
++# see copy file rules in core/Makefile
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini.arm:advancedFeatures.ini \
++    prebuilts/qemu-kernel/arm/3.18/kernel-qemu2:kernel-ranchu \
++    device/generic/goldfish/fstab.ranchu.arm:root/fstab.ranchu \
++    device/generic/goldfish/fstab.ranchu.early.arm:root/fstab.ranchu.early
++
+ include $(SRC_TARGET_DIR)/product/full.mk
+ 
+ PRODUCT_NAME := aosp_arm
+diff --git a/target/product/aosp_arm64.mk b/target/product/aosp_arm64.mk
+index 98afe5f..18d613b 100644
+--- a/target/product/aosp_arm64.mk
++++ b/target/product/aosp_arm64.mk
+@@ -1,5 +1,5 @@
+ #
+-# Copyright (C) 2013 The Android Open-Source Project
++# Copyright (C) 2017 The Android Open-Source Project
+ #
+ # Licensed under the Apache License, Version 2.0 (the "License");
+ # you may not use this file except in compliance with the License.
+@@ -14,14 +14,22 @@
+ # limitations under the License.
+ #
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib64/libreference-ril.so
++
+ # This is a build configuration for a full-featured build of the
+ # Open-Source part of the tree. It's geared toward a US-centric
+ # build quite specifically for the emulator, and might not be
+ # entirely appropriate to inherit from for on-device configurations.
+ 
+-# This is for enabling ethernet support for ranchu.
+-# Consider removing this after RIL support is provided in ranchu.
+-PRODUCT_COPY_FILES += frameworks/native/data/etc/android.hardware.ethernet.xml:system/etc/permissions/android.hardware.ethernet.xml
++# Note: the following lines need to stay at the beginning so that it can
++# take priority  and override the rules it inherit from other mk files
++# see copy file rules in core/Makefile
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini.arm:advancedFeatures.ini \
++    prebuilts/qemu-kernel/arm64/3.18/kernel-qemu2:kernel-ranchu \
++    device/generic/goldfish/fstab.ranchu.arm:root/fstab.ranchu \
++    device/generic/goldfish/fstab.ranchu.early.arm:root/fstab.ranchu.early
+ 
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/aosp_base_telephony.mk)
+diff --git a/target/product/aosp_x86.mk b/target/product/aosp_x86.mk
+index cba43c4..03203ce 100644
+--- a/target/product/aosp_x86.mk
++++ b/target/product/aosp_x86.mk
+@@ -13,6 +13,19 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ #
++
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib/libreference-ril.so
++
++# This is a build configuration for a full-featured build of the
++# Open-Source part of the tree. It's geared toward a US-centric
++# build quite specifically for the emulator, and might not be
++# entirely appropriate to inherit from for on-device configurations.
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini:advancedFeatures.ini \
++    device/generic/goldfish/data/etc/encryptionkey.img:encryptionkey.img \
++    prebuilts/qemu-kernel/x86/3.18/kernel-qemu2:kernel-ranchu
++
+ include $(SRC_TARGET_DIR)/product/full_x86.mk
+ 
+ PRODUCT_NAME := aosp_x86
+diff --git a/target/product/aosp_x86_64.mk b/target/product/aosp_x86_64.mk
+index 4006346..693bdaf 100644
+--- a/target/product/aosp_x86_64.mk
++++ b/target/product/aosp_x86_64.mk
+@@ -14,18 +14,18 @@
+ # limitations under the License.
+ #
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib64/libreference-ril.so
++
+ # This is a build configuration for a full-featured build of the
+ # Open-Source part of the tree. It's geared toward a US-centric
+ # build quite specifically for the emulator, and might not be
+ # entirely appropriate to inherit from for on-device configurations.
+ 
+-# If running on an emulator or some other device that has a LAN connection
+-# that isn't a wifi connection. This will instruct init.rc to enable the
+-# network connection so that you can use it with ADB
+-
+-# This is for enabling ethernet support for ranchu.
+-# Consider removing this after RIL support is provided in ranchu.
+-PRODUCT_COPY_FILES += frameworks/native/data/etc/android.hardware.ethernet.xml:system/etc/permissions/android.hardware.ethernet.xml
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini:advancedFeatures.ini \
++    device/generic/goldfish/data/etc/encryptionkey.img:encryptionkey.img \
++    prebuilts/qemu-kernel/x86_64/3.18/kernel-qemu2:kernel-ranchu
+ 
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/aosp_base_telephony.mk)
+diff --git a/target/product/emulator.mk b/target/product/emulator.mk
+index 5a5fb8e..3b4ab77 100644
+--- a/target/product/emulator.mk
++++ b/target/product/emulator.mk
+@@ -36,11 +36,13 @@ PRODUCT_PACKAGES += \
+     libGLESv2_emulation \
+     libGLESv1_enc \
+     qemu-props \
+-    qemud \
+     camera.goldfish \
+     camera.goldfish.jpeg \
+     camera.ranchu \
+     camera.ranchu.jpeg \
++    keystore.ranchu \
++    keystore.goldfish \
++    gatekeeper.ranchu \
+     lights.goldfish \
+     gps.goldfish \
+     gps.ranchu \
+@@ -62,7 +64,9 @@ PRODUCT_PACKAGES += \
+     android.hardware.graphics.mapper@2.0-impl \
+     hwcomposer.goldfish \
+     hwcomposer.ranchu \
++    sh_vendor \
+     vintf \
++    toybox_vendor \
+     CarrierConfig
+ 
+ PRODUCT_PACKAGES += \
+@@ -72,40 +76,78 @@ PRODUCT_PACKAGES += \
+     android.hardware.soundtrigger@2.0-impl
+ 
+ PRODUCT_PACKAGES += \
+-	android.hardware.keymaster@3.0-impl \
+-	android.hardware.keymaster@3.0-service
++    android.hardware.keymaster@3.0-impl \
++    android.hardware.keymaster@3.0-service
+ 
+ PRODUCT_PACKAGES += \
+     android.hardware.gnss@1.0-service \
+     android.hardware.gnss@1.0-impl
+ 
+ PRODUCT_PACKAGES += \
+-	android.hardware.sensors@1.0-impl \
+-	android.hardware.sensors@1.0-service
++    android.hardware.sensors@1.0-impl \
++    android.hardware.sensors@1.0-service
++
++PRODUCT_PACKAGES += \
++    android.hardware.drm@1.0-service \
++    android.hardware.drm@1.0-impl
+ 
+ PRODUCT_PACKAGES += \
+     android.hardware.power@1.0-service \
+     android.hardware.power@1.0-impl
+ 
+-# camera service treble disable until all backwards compat is complete
+-PRODUCT_PROPERTY_OVERRIDES += \
+-    camera.disable_treble=1
++PRODUCT_PACKAGES += \
++    camera.device@1.0-impl \
++    android.hardware.camera.provider@2.4-service \
++    android.hardware.camera.provider@2.4-impl \
++
++PRODUCT_PACKAGES += \
++    android.hardware.gatekeeper@1.0-impl \
++    android.hardware.gatekeeper@1.0-service
++
++# need this for gles libraries to load properly
++# after moving to /vendor/lib/
++PRODUCT_PACKAGES += \
++    android.hardware.renderscript@1.0.vndk-sp\
++    android.hardware.graphics.allocator@2.0.vndk-sp\
++    android.hardware.graphics.mapper@2.0.vndk-sp\
++    android.hardware.graphics.common@1.0.vndk-sp\
++    libhwbinder.vndk-sp\
++    libbase.vndk-sp\
++    libcutils.vndk-sp\
++    libhardware.vndk-sp\
++    libhidlbase.vndk-sp\
++    libhidltransport.vndk-sp\
++    libutils.vndk-sp\
++    libc++.vndk-sp\
++    libRS_internal.vndk-sp\
++    libRSDriver.vndk-sp\
++    libRSCpuRef.vndk-sp\
++    libbcinfo.vndk-sp\
++    libblas.vndk-sp\
++    libft2.vndk-sp\
++    libpng.vndk-sp\
++    libcompiler_rt.vndk-sp\
++    libbacktrace.vndk-sp\
++    libunwind.vndk-sp\
++    libunwindstack.vndk-sp\
++    liblzma.vndk-sp\
++    libz.vndk-sp\
+ 
+ PRODUCT_COPY_FILES += \
+-    device/generic/goldfish/fstab.goldfish:root/fstab.goldfish \
+-    device/generic/goldfish/init.goldfish.rc:root/init.goldfish.rc \
+-    device/generic/goldfish/init.goldfish.sh:system/etc/init.goldfish.sh \
+-    device/generic/goldfish/init.ranchu-core.sh:$(TARGET_COPY_OUT_VENDOR)/bin/init.ranchu-core.sh \
+-    device/generic/goldfish/init.ranchu-net.sh:$(TARGET_COPY_OUT_VENDOR)/bin/init.ranchu-net.sh \
+-    device/generic/goldfish/init.ranchu.rc:root/init.ranchu.rc \
+-    device/generic/goldfish/ueventd.goldfish.rc:root/ueventd.goldfish.rc \
++    device/generic/goldfish/init.ranchu-core.sh:vendor/bin/init.ranchu-core.sh \
++    device/generic/goldfish/init.ranchu-net.sh:vendor/bin/init.ranchu-net.sh \
+     device/generic/goldfish/init.ranchu.rc:root/init.ranchu.rc \
+     device/generic/goldfish/fstab.ranchu:root/fstab.ranchu \
++    device/generic/goldfish/fstab.ranchu.early:root/fstab.ranchu.early \
+     device/generic/goldfish/ueventd.ranchu.rc:root/ueventd.ranchu.rc \
+-    device/generic/goldfish/manifest.xml:$(TARGET_COPY_OUT_VENDOR)/manifest.xml \
+     device/generic/goldfish/input/goldfish_rotary.idc:system/usr/idc/goldfish_rotary.idc \
++    device/generic/goldfish/manifest.xml:$(TARGET_COPY_OUT_VENDOR)/manifest.xml \
++    device/generic/goldfish/data/etc/permissions/privapp-permissions-goldfish.xml:system/etc/permissions/privapp-permissions-goldfish.xml \
++    device/generic/goldfish/data/etc/config.ini:config.ini \
+     frameworks/native/data/etc/android.hardware.usb.accessory.xml:system/etc/permissions/android.hardware.usb.accessory.xml
+ 
+ PRODUCT_PACKAGE_OVERLAYS := device/generic/goldfish/overlay
+ 
+ PRODUCT_CHARACTERISTICS := emulator
++
++PRODUCT_FULL_TREBLE_OVERRIDE := true
+diff --git a/target/product/sdk_base.mk b/target/product/sdk_base.mk
+index 0b14203..6d4d59f 100644
+--- a/target/product/sdk_base.mk
++++ b/target/product/sdk_base.mk
+@@ -24,11 +24,10 @@ PRODUCT_PACKAGES := \
+ 	Development \
+ 	Dialer \
+ 	EmulatorSmokeTests \
+-	Fallback \
+ 	Gallery2 \
+ 	GestureBuilder \
+ 	Launcher3 \
+-	LegacyCamera \
++	Camera2 \
+ 	librs_jni \
+ 	libwnndict \
+ 	libWnnEngDic \
+@@ -102,6 +101,7 @@ PRODUCT_COPY_FILES := \
+ 	frameworks/native/data/etc/android.hardware.touchscreen.multitouch.jazzhand.xml:system/etc/permissions/android.hardware.touchscreen.multitouch.jazzhand.xml \
+ 	frameworks/native/data/etc/android.hardware.camera.xml:system/etc/permissions/android.hardware.camera.xml \
+ 	frameworks/native/data/etc/android.hardware.fingerprint.xml:system/etc/permissions/android.hardware.fingerprint.xml \
++	frameworks/native/data/etc/android.software.autofill.xml:system/etc/permissions/android.software.autofill.xml \
+ 	frameworks/av/media/libeffects/data/audio_effects.conf:system/etc/audio_effects.conf \
+ 	device/generic/goldfish/audio_policy.conf:system/etc/audio_policy.conf
+ 
+diff --git a/target/product/sdk_phone_arm64.mk b/target/product/sdk_phone_arm64.mk
+index a689475..2aa688b 100644
+--- a/target/product/sdk_phone_arm64.mk
++++ b/target/product/sdk_phone_arm64.mk
+@@ -14,11 +14,23 @@
+ # limitations under the License.
+ #
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib64/libreference-ril.so
++
+ # This is a build configuration for a full-featured build of the
+ # Open-Source part of the tree. It's geared toward a US-centric
+ # build quite specifically for the emulator, and might not be
+ # entirely appropriate to inherit from for on-device configurations.
+ 
++# Note: the following lines need to stay at the beginning so that it can
++# take priority  and override the rules it inherit from other mk files
++# see copy file rules in core/Makefile
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini.arm:advancedFeatures.ini \
++    prebuilts/qemu-kernel/arm64/3.18/kernel-qemu2:kernel-ranchu \
++    device/generic/goldfish/fstab.ranchu.arm:root/fstab.ranchu \
++    device/generic/goldfish/fstab.ranchu.early.arm:root/fstab.ranchu.early
++
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/sdk_base.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/board/generic_arm64/device.mk)
+@@ -34,3 +46,5 @@ PRODUCT_BRAND := Android
+ PRODUCT_NAME := sdk_phone_arm64
+ PRODUCT_DEVICE := generic_arm64
+ PRODUCT_MODEL := Android SDK built for arm64
++
++
+diff --git a/target/product/sdk_phone_armv7.mk b/target/product/sdk_phone_armv7.mk
+index ebdd0e7..e99f0f5 100644
+--- a/target/product/sdk_phone_armv7.mk
++++ b/target/product/sdk_phone_armv7.mk
+@@ -14,6 +14,18 @@
+ # limitations under the License.
+ #
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib/libreference-ril.so
++
++# Note: the following lines need to stay at the beginning so that it can
++# take priority  and override the rules it inherit from other mk files
++# see copy file rules in core/Makefile
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini.arm:advancedFeatures.ini \
++    prebuilts/qemu-kernel/arm/3.18/kernel-qemu2:kernel-ranchu \
++    device/generic/goldfish/fstab.ranchu.arm:root/fstab.ranchu \
++    device/generic/goldfish/fstab.ranchu.early.arm:root/fstab.ranchu.early
++
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/sdk_base.mk)
+ 
+ # AOSP emulator images build the AOSP messaging app.
+diff --git a/target/product/sdk_phone_x86.mk b/target/product/sdk_phone_x86.mk
+index 01c2e83..1e82773 100644
+--- a/target/product/sdk_phone_x86.mk
++++ b/target/product/sdk_phone_x86.mk
+@@ -14,10 +14,17 @@
+ # limitations under the License.
+ #
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib/libreference-ril.so
++
+ # This is a build configuration for a full-featured build of the
+ # Open-Source part of the tree. It's geared toward a US-centric
+ # build quite specifically for the emulator, and might not be
+ # entirely appropriate to inherit from for on-device configurations.
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini:advancedFeatures.ini \
++    device/generic/goldfish/data/etc/encryptionkey.img:encryptionkey.img \
++    prebuilts/qemu-kernel/x86/3.18/kernel-qemu2:kernel-ranchu
+ 
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/sdk_base.mk)
+ 
+diff --git a/target/product/sdk_phone_x86_64.mk b/target/product/sdk_phone_x86_64.mk
+index c3bc5e9..a18c4f8 100644
+--- a/target/product/sdk_phone_x86_64.mk
++++ b/target/product/sdk_phone_x86_64.mk
+@@ -14,11 +14,19 @@
+ # limitations under the License.
+ #
+ 
++PRODUCT_PROPERTY_OVERRIDES += \
++	rild.libpath=/vendor/lib64/libreference-ril.so
++
+ # This is a build configuration for a full-featured build of the
+ # Open-Source part of the tree. It's geared toward a US-centric
+ # build quite specifically for the emulator, and might not be
+ # entirely appropriate to inherit from for on-device configurations.
+ 
++PRODUCT_COPY_FILES += \
++    development/sys-img/advancedFeatures.ini:advancedFeatures.ini \
++    device/generic/goldfish/data/etc/encryptionkey.img:encryptionkey.img \
++    prebuilts/qemu-kernel/x86_64/3.18/kernel-qemu2:kernel-ranchu
++
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/sdk_base.mk)
+ 

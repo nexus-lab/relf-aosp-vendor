@@ -1,0 +1,14 @@
+diff --git a/src/com/android/settings/wfd/WifiDisplaySettings.java b/src/com/android/settings/wfd/WifiDisplaySettings.java
+index 0d6b4dc..d9b3b63 100755
+--- a/src/com/android/settings/wfd/WifiDisplaySettings.java
++++ b/src/com/android/settings/wfd/WifiDisplaySettings.java
+@@ -212,8 +212,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
+     }
+ 
+     public static boolean isAvailable(Context context) {
+-        return context.getSystemService(Context.DISPLAY_SERVICE) != null
+-                && context.getSystemService(Context.WIFI_P2P_SERVICE) != null;
++        return false;
+     }
+ 
+     private void scheduleUpdate(int changes) {

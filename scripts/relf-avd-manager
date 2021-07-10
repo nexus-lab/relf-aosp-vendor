@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+
+#------------------------------------------------------------------
+#  To run the emulator, you will need to install the following
+#  packages as well as enable KVM
+#
+#    sudo apt update
+#    sudo apt install libc6 libncurses5 libstdc++6 \
+#         qemu-kvm libvirt-daemon-system libvirt-clients \
+#         bridge-utils
+#------------------------------------------------------------------
+
+EMULATOR_ROOT=~/.relf/emulator
+IMAGE_ROOT=~/.relf/image
+AVD_ROOT=~/.relf/avd
+TMP_DIR=${TMP_DIR:-/tmp}
+ADB=$(which adb)
+
+mkdir -p ${EMULATOR_ROOT}
+mkdir -p ${IMAGE_ROOT}
+mkdir -p ${AVD_ROOT}
+
+function get_image_dir() {
+    local sdk=$1
+    echo "$IMAGE_ROOT/$sdk"
+}
+
+function get_avd_dir() {
+    local name=$1
+    echo "$AVD_ROOT/$name"
+}
+
+function get_emu_tag() {
+    local sdk=$1
+    case ${sdk} in
+        2[1-3])
+            echo "android-6.0.1_r81"
+            ;;
+        2[4-5])
+            echo "android-7.1.2_r36"
+            ;;
+        2[6-8])
+            echo "android-9.0.0_r30"
+            ;;
+    esac
+}
+
+function get_emu_exec() {
+    local sdk=$1
+    local tag=$(get_emu_tag $sdk)
+    local exe=""
+    case ${sdk} in
+        2[1-5])
+            exe="emulator64-x86"
+            ;;
+        2[6-8])
+            exe="emulator"
+            ;;
+    esac
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        echo "$EMULATOR_ROOT/$tag/linux-x86_64/$exe"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "$EMULATOR_ROOT/$tag/darwin-x86_64/$exe"
+    fi
+}
+
+function get_kernel() {
+    local sdk=$1
+    case ${sdk} in
+        2[1-5])
+            echo "kernel-qemu"
+            ;;
+        2[6-8])
+            echo "kernel-ranchu"
+            ;;
+    esac
+}
+
+function get_emu_extra_args() {
+    local sdk=$1
+    case ${sdk} in
+        2[1-3])
+            echo "-gpu mesa -qemu -L bios"
+            ;;
+        24)
+            echo "-gpu mesa"
+            ;;
+    esac
+}
+
+function get_avd_pid_by_name() {
+    local name=$1
+    local avd_dir=$(get_avd_dir ${name})
+    echo $(lsof ${avd_dir}/system.img 2>/dev/null | awk '{ print $2 }' | tail -1)
+}
+
+function get_adb_serial_by_pid() {
+    local pid=$1
+    local ports=$(lsof -Pan -p ${pid} -iTCP -sTCP:LISTEN 2>/dev/null | tail -n +2 | awk '{ split($9,a,":"); print a[2] }')
+    for port in ${ports}; do
+        local serial=$(${ADB} devices | grep emulator-${port} | awk '{ print $1 }')
+        if [[ ! -z ${serial} ]]; then
+            echo ${serial}
+            return 0
+        fi
+    done
+}
+
+function download_emu() {
+    local tag=$1
+    local out_dir=${EMULATOR_ROOT}/${tag}
+    git clone https://android.googlesource.com/platform/prebuilts/android-emulator \
+        -b ${tag} --depth 1 ${out_dir}
+}
+
+function list() {
+    ls ${AVD_ROOT}
+}
+
+function create() {
+    local sdk=$1
+    local name=$2
+    local avd_dir=$(get_avd_dir ${name})
+    if [[ -d ${avd_dir} ]]; then
+        echo "AVD $name already exists"
+        return -1
+    fi
+    local image_dir=$(get_image_dir ${sdk})
+    if [[ ! -d ${image_dir} ]]; then
+        echo "Cannot find image directory $image_dir"
+        return -1
+    fi
+    mkdir -p ${avd_dir}
+    cp -R ${image_dir}/* ${avd_dir}
+    if [[ ${sdk} -eq 25 && ! -f ${avd_dir}/vendor.img ]]; then
+        touch ${avd_dir}/vendor.img
+    fi
+    echo ${sdk} > ${avd_dir}/sdk_version
+}
+
+function remove() {
+    local name=$1
+    local avd_dir=$(get_avd_dir ${name})
+    rm -rf ${avd_dir}
+}
+
+function start() {
+    local name=$1
+    local extra_args=${@:2}
+    local avd_dir=$(get_avd_dir ${name})
+    if [[ ! -d ${avd_dir} ]]; then
+        echo "AVD $name does not exist"
+        return -1
+    fi
+    local sdk=$(cat ${avd_dir}/sdk_version)
+    local emu_tag=$(get_emu_tag ${sdk})
+    local emu_exec=$(get_emu_exec ${sdk})
+    if [[ ! -f ${emu_exec} ]]; then
+        download_emu ${emu_tag}
+    fi
+    local from_dir=$(pwd)
+    cd ${avd_dir}
+    LD_LIBRARY_PATH=$(dirname ${emu_exec})/lib64:$(dirname ${emu_exec})/lib64/qt/lib \
+    ANDROID_PRODUCT_OUT=. ${emu_exec} \
+        -kernel $(get_kernel ${sdk}) \
+        -sysdir . \
+        -data userdata.img \
+        ${extra_args} \
+        $(get_emu_extra_args ${sdk})
+    cd ${from_dir}
+}
+
+function adb() {
+    local name=$1
+    local extra_args=${@:2}
+    local pid=$(get_avd_pid_by_name ${name})
+    if [[ -z ${pid} ]]; then
+        echo "AVD ${name} is not running"
+        return -1
+    fi
+    local serial=$(get_adb_serial_by_pid ${pid})
+    if [[ -z ${serial} ]]; then
+        echo "Cannot find the ADB port for AVD ${name}"
+        return -1
+    fi
+    ${ADB} -s ${serial} ${extra_args}
+}
+
+function shell() {
+    local name=$1
+    local extra_args=${@:2}
+    adb ${name} shell ${extra_args}
+}
+
+if [[ "$#" < 1 ]]; then
+    echo "A helper script for managing ReLF AOSP virtual devices."
+    echo
+    echo "Usage:"
+    echo "    list:                         Print out all created AVDs"
+    echo "    create <sdk> <name>:          Create a new virtual device from the prebuilt images"
+    echo "    remove <name>:                Remove an existing virtual device"
+    echo "    start <name> [extra_args]:    Start an existing virtual device"
+    echo "    adb <name> [extra_args]:      Run ADB command which targets a running virtual device"
+    echo "    shell <name> [extra_args]:    ADB shell into a running virtual device"
+else
+    $1 "${@:2}"
+fi

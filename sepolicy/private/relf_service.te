@@ -1,0 +1,4 @@
+typeattribute relf coredomain;
+permissive relf;
+
+init_daemon_domain(relf)
