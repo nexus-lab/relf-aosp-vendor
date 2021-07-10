@@ -59,5 +59,5 @@
 #endif
 
 #ifndef ERRNO_EXCEPTION
-#define ERRNO_EXCEPTION() android::binder::Status::fromServiceSpecificError(errno, ::strerror(errno))
+#define ERRNO_EXCEPTION() android::binder::Status::fromServiceSpecificError(errno, String8(::strerror(errno)))
 #endif

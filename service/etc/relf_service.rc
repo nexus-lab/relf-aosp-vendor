@@ -1,7 +1,2 @@
 service relf_service /system/bin/relf_service
     class main
-    user system
-    # readproc to list all proc dirs
-    group system readproc
-    # CAP_SYS_PTRACE to read some proc files
-    capabilities DAC_READ_SEARCH SYS_PTRACE

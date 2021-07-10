@@ -24,17 +24,47 @@ namespace android {
 namespace os {
 
 status_t ParcelFileDescriptor::writeToParcel(Parcel* parcel) const {
-    return parcel->writeParcelFileDescriptor(fd_, takeOwnership_);
+    status_t status;
+    status = parcel->writeInt32(commChannel_ > -1 ? 1 : 0);
+    if (status != OK) {
+        return status;
+    }
+    status = parcel->writeDupFileDescriptor(fd_);
+    if (status != OK) {
+        return status;
+    }
+    if (commChannel_ > -1) {
+        status = parcel->writeDupFileDescriptor(commChannel_);
+        if (status != OK) {
+            return status;
+        }
+    }
+    return status;
 }
 
 status_t ParcelFileDescriptor::readFromParcel(const Parcel* parcel) {
-    fd_ = parcel->readParcelFileDescriptor();
+    int hasCommChannel;
+    status_t status;
+    hasCommChannel = parcel->readInt32();
+    if (status != OK) {
+        return status;
+    }
+    fd_ = parcel->readFileDescriptor();
+    if (fd_ < 0) {
+        return BAD_VALUE;
+    }
+    if (hasCommChannel != 0) {
+        commChannel_ = parcel->readFileDescriptor();
+        if (commChannel_ < 0) {
+            return BAD_VALUE;
+        }
+    }
     return OK;
 }
 
-void ParcelFileDescriptor::setFileDescriptor(int fd, bool takeOwnership) {
+void ParcelFileDescriptor::setFileDescriptor(int fd, int commChannel) {
     fd_ = fd;
-    takeOwnership_ = takeOwnership;
+    commChannel_ = commChannel;
 }
 
 int ParcelFileDescriptor::fd() const {
