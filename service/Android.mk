@@ -4,10 +4,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := relf_service
 LOCAL_MODULE_TAGS := optional
 LOCAL_SRC_FILES := \
-	$(call all-cpp-files-under, src) \
-	$(call all-Iaidl-files-under, aidl)
-LOCAL_AIDL_INCLUDES := \
-	$(LOCAL_PATH)/aidl
+	$(call all-cpp-files-under, src)
 LOCAL_SHARED_LIBRARIES := \
 	libutils \
 	libcutils \
@@ -17,5 +14,4 @@ LOCAL_C_INCLUDES += \
 	frameworks/native/include \
 	system/core/include \
 	$(LOCAL_PATH)/include
-LOCAL_INIT_RC := etc/relf_service.rc
 include $(BUILD_EXECUTABLE)

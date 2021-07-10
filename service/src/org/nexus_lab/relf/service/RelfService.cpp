@@ -3,6 +3,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <private/android_filesystem_config.h>
 #include <pthread.h>
@@ -13,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
+#include <utils/String8.h>
 
 using namespace std;
 using namespace android;
@@ -34,7 +36,7 @@ struct _pipe_args {
 typedef struct _pipe_args pipe_args;
 
 const char *string16_to_char(const String16 &str) {
-    return String8(str.string()).string();
+    return String8(str).string();
 }
 
 int is_fd_valid(int fd) {
@@ -208,10 +210,18 @@ Status RelfService::getpwent(vector<ParcelStructPasswd> *retval) {
     int i;
     struct passwd *pwd;
     for (i = 0; i < AID_APP; i++) {
+#ifdef AID_OEM_RESERVED_START
+#ifdef AID_OEM_RESERVED_2_START
         if ((i >= AID_OEM_RESERVED_START && i <= AID_OEM_RESERVED_END) ||
             (i >= AID_OEM_RESERVED_2_START && i <= AID_OEM_RESERVED_2_END)) {
             continue;
         }
+#else
+        if (i >= AID_OEM_RESERVED_START && i <= AID_OEM_RESERVED_END) {
+            continue;
+        }
+#endif
+#endif
         if ((pwd = ::getpwuid(i)) != NULL) {
             ParcelStructPasswd p = ParcelStructPasswd();
             fill_passwd(pwd, &p);

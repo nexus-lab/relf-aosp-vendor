@@ -3,6 +3,7 @@ type relf_exec, exec_type, file_type;
 
 binder_use(relf)
 binder_service(relf)
-add_service(relf, relf_service)
+allow relf relf_service:service_manager add;
+neverallow { domain -relf } relf_service:service_manager add;
 
-binder_call(relf, priv_app)
+binder_call(relf, appdomain)

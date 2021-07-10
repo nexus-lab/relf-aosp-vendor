@@ -3,7 +3,6 @@ PRODUCT_PACKAGES += \
     ReLF
 
 PRODUCT_COPY_FILES += \
-    vendor/relf/permissions/privapp-permissions.xml:system/etc/permissions/org.nexus_lab.relf.mobile.xml \
-    vendor/relf/permissions/default-permissions.xml:system/etc/default-permissions/org.nexus_lab.relf.mobile.xml
+    vendor/relf/service/etc/relf_service.rc:root/init.relf_service.rc
 
 include vendor/relf/sepolicy/sepolicy.mk

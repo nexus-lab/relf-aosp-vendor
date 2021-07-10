@@ -39,25 +39,25 @@
 #endif
 
 #ifndef READ_PARCEL_STRING_OR_RETURN
-#define READ_PARCEL_STRING_OR_RETURN(var)           \
-    {                                              \
-        status_t status;                           \
-        if ((status = p->readString16(&var)) != OK) { \
-            return status;                         \
-        }                                          \
-    };
+#define READ_PARCEL_STRING_OR_RETURN(var)             \
+    {                                                 \
+        var = p->readString16();                      \
+        if (var.size() <= 0) {                        \
+            return BAD_VALUE;                         \
+        }                                             \
+    }
 #endif
 
 #ifndef WRITE_PARCEL_STRING_OR_RETURN
-#define WRITE_PARCEL_STRING_OR_RETURN(var)          \
-    {                                              \
-        status_t status;                           \
+#define WRITE_PARCEL_STRING_OR_RETURN(var)            \
+    {                                                 \
+        status_t status;                              \
         if ((status = p->writeString16(var)) != OK) { \
-            return status;                         \
-        }                                          \
+            return status;                            \
+        }                                             \
     }
 #endif
 
 #ifndef ERRNO_EXCEPTION
-#define ERRNO_EXCEPTION() android::binder::Status::fromServiceSpecificError(errno, ::strerror(errno))
+#define ERRNO_EXCEPTION() android::binder::Status::fromServiceSpecificError(errno, android::String8(::strerror(errno)))
 #endif
