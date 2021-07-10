@@ -9,9 +9,14 @@ LOCAL_SHARED_LIBRARIES := \
 	libutils \
 	libcutils \
 	libbinder \
-	liblog
+	liblog \
+	libstlport
 LOCAL_C_INCLUDES += \
+    bionic \
+    bionic/libstdc++/include \
+    external/stlport/stlport \
 	frameworks/native/include \
 	system/core/include \
 	$(LOCAL_PATH)/include
+LOCAL_CPPFLAGS += -std=c++11
 include $(BUILD_EXECUTABLE)

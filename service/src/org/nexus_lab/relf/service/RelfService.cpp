@@ -211,16 +211,10 @@ Status RelfService::getpwent(vector<ParcelStructPasswd> *retval) {
     struct passwd *pwd;
     for (i = 0; i < AID_APP; i++) {
 #ifdef AID_OEM_RESERVED_START
-#ifdef AID_OEM_RESERVED_2_START
         if ((i >= AID_OEM_RESERVED_START && i <= AID_OEM_RESERVED_END) ||
             (i >= AID_OEM_RESERVED_2_START && i <= AID_OEM_RESERVED_2_END)) {
             continue;
         }
-#else
-        if (i >= AID_OEM_RESERVED_START && i <= AID_OEM_RESERVED_END) {
-            continue;
-        }
-#endif
 #endif
         if ((pwd = ::getpwuid(i)) != NULL) {
             ParcelStructPasswd p = ParcelStructPasswd();

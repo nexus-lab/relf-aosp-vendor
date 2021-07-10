@@ -24,40 +24,13 @@ namespace android {
 namespace os {
 
 status_t ParcelFileDescriptor::writeToParcel(Parcel* parcel) const {
-    status_t status;
-    status = parcel->writeInt32(commChannel_ > -1 ? 1 : 0);
-    if (status != OK) {
-        return status;
-    }
-    status = parcel->writeDupFileDescriptor(fd_);
-    if (status != OK) {
-        return status;
-    }
-    if (commChannel_ > -1) {
-        status = parcel->writeDupFileDescriptor(commChannel_);
-        if (status != OK) {
-            return status;
-        }
-    }
-    return status;
+    return parcel->writeParcelFileDescriptor(fd_, commChannel_);
 }
 
 status_t ParcelFileDescriptor::readFromParcel(const Parcel* parcel) {
-    int hasCommChannel;
-    status_t status;
-    hasCommChannel = parcel->readInt32();
-    if (status != OK) {
-        return status;
-    }
-    fd_ = parcel->readFileDescriptor();
-    if (fd_ < 0) {
+    fd_ = parcel->readParcelFileDescriptor(commChannel_);
+    if (fd_ == -1) {
         return BAD_VALUE;
-    }
-    if (hasCommChannel != 0) {
-        commChannel_ = parcel->readFileDescriptor();
-        if (commChannel_ < 0) {
-            return BAD_VALUE;
-        }
     }
     return OK;
 }

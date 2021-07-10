@@ -219,19 +219,10 @@ status_t BnRelfService::onTransact(uint32_t code, const Parcel& data, Parcel* re
         case Call::PIPE: {
             ParcelFileDescriptor in_pipe;
             String16 in_path;
-            int32_t has_fd;
             int64_t in_offset;
             int64_t in_length;
             if (!(data.checkInterface(this))) {
                 status = BAD_TYPE;
-                break;
-            }
-            status = data.readInt32(&has_fd);
-            if (status != OK) {
-                break;
-            }
-            if (has_fd != 1) {
-                status = BAD_VALUE;
                 break;
             }
             status = in_pipe.readFromParcel(&data);
